@@ -3,13 +3,14 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Minhas Finanças</title>
+<title>RCS Finance</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <link rel="manifest" href="manifest.webmanifest">
-<meta name="theme-color" content="#0f766e">
+<meta name="theme-color" content="#0c0d12">
 <link rel="icon" href="icon-192.png">
 <link rel="apple-touch-icon" href="icon-192.png">
 <meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-title" content="Finanças">
+<meta name="apple-mobile-web-app-title" content="RCS Finance">
 <style>
 :root{--bg:#f6f7f9;--card:#fff;--tx:#1b1f24;--mut:#6b7480;--bd:#e3e6ea;--pri:#0f766e;--red:#c2410c;--grn:#15803d;--warn:#fef3c7;--warnt:#78350f;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
 @media (prefers-color-scheme:dark){:root:not([data-theme="light"]){color-scheme:dark;--bg:#111418;--card:#1b2026;--tx:#e8ebee;--mut:#98a2ae;--bd:#2c333b;--pri:#2dd4bf;--red:#fb923c;--grn:#4ade80;--warn:#3b2f0a;--warnt:#fde68a}}
@@ -34,9 +35,12 @@ nav{position:fixed;left:0;right:0;bottom:0;display:flex;background:var(--card);b
 nav button{background:none;color:var(--mut);border-radius:0;padding:12px 4px;font-size:13px}
 nav button.on{color:var(--pri)}
 .red{color:var(--red)}.grn{color:var(--grn)}.mut{color:var(--mut);font-size:13px}
+.brand{background:#0c0d12;border-radius:12px;margin:14px 14px 0;display:flex;justify-content:center;padding:6px}.brand img{display:block;width:100%;max-width:300px;height:auto}
+@media(min-width:680px){.brand{max-width:612px;margin:14px auto 0}}
 </style>
 </head>
 <body>
+<div class="brand"><img src="logo.png" alt="RCS Finance"></div>
 <main id="app"></main>
 <nav id="nav"></nav>
 <script>
@@ -49,6 +53,8 @@ const uid=()=>Math.random().toString(36).slice(2,9);
 const CATS=['Moradia','Mercado','Transporte','Lazer','Saúde','Contas','Educação','Outros'];
 let S={tx:[],bills:[],goals:[],cfg:{payday:7}},tab='resumo',ref=null,loaded=false,note='';
 const KEY='financas-v1';
+let vm=iso(today()).slice(0,7);
+const daysList=()=>String(S.cfg.days||'7,20').split(/[ ,;]+/).map(Number).filter(n=>n>=1&&n<=28);
 
 function init(){loadLocal()}
 function loadLocal(){
@@ -62,8 +68,9 @@ function save(){
 }
 const monthKey=s=>s.slice(0,7);
 function nextPayday(){
-  const d=today(),p=S.cfg.payday||7;let n=new Date(d.getFullYear(),d.getMonth(),p);
-  if(n<d)n=new Date(d.getFullYear(),d.getMonth()+1,p);return n;
+  const d=today();let best=null;
+  daysList().forEach(p=>{let n=new Date(d.getFullYear(),d.getMonth(),p);if(n<d)n=new Date(d.getFullYear(),d.getMonth()+1,p);if(!best||n<best)best=n});
+  return best||new Date(d.getFullYear(),d.getMonth()+1,7);
 }
 function pmt(g){
   const n=Math.max(1,Math.ceil((parse(g.date)-today())/(864e5*30.4))),r=(g.rate||0)/100,saved=g.saved||0;
@@ -71,14 +78,14 @@ function pmt(g){
   return Math.max(0,(g.target-saved)/n);
 }
 function views(){
-  const mk=iso(today()).slice(0,7),m=S.tx.filter(t=>monthKey(t.date)===mk);
+  const mk=vm,m=S.tx.filter(t=>monthKey(t.date)===mk);
   const sum=ty=>m.filter(t=>t.type===ty).reduce((a,t)=>a+t.value,0);
   return {mk,rec:sum('receita'),gas:sum('gasto'),inv:sum('investimento'),m};
 }
 function resumo(){
   const v=views(),np=nextPayday(),dp=Math.round((np-today())/864e5);
-  let h='<h1>Resumo do mês</h1>';
-  h+=`<div class="alert">${dp===0?'💰 Hoje é dia '+S.cfg.payday+': hora de investir!':'📅 Próximo dia de investir ('+np.toLocaleDateString('pt-BR')+'): faltam '+dp+' dia(s).'}</div>`;
+  let h=`<h1>Resumo</h1><div class="card"><div class="k">Mês exibido</div><input type="month" value="${vm}" onchange="vm=this.value||vm;render()"></div>`;
+  h+=`<div class="alert">${dp===0?'💰 Hoje é dia '+np.getDate()+': hora de guardar dinheiro para investir!':'📅 Próximo dia de investir ('+np.toLocaleDateString('pt-BR')+'): faltam '+dp+' dia(s).'}</div>`;
   const open=S.bills.filter(b=>!b.paid).sort((a,b)=>a.due.localeCompare(b.due));
   open.filter(b=>dias(b.due)<=3).forEach(b=>{const d=dias(b.due);h+=`<div class="alert">${d<0?'⚠️ Atrasado':'🔔'} ${b.name} (${brl(b.value)}) ${d<0?'venceu há '+(-d)+' dia(s)':d===0?'vence hoje':'vence em '+d+' dia(s)'}</div>`});
   S.goals.forEach(g=>{h+=`<div class="alert">🎯 ${g.name}: invista ${brl(pmt(g))} neste mês.</div>`});
@@ -88,7 +95,7 @@ function resumo(){
   h+='<div class="card"><h2>Onde você mais gastou</h2>';
   h+=ent.length?ent.map(([c,x])=>`<div style="margin-bottom:8px"><div class="row" style="border:0;padding:0"><span>${c}</span><b>${brl(x)}</b></div><div class="bar"><i style="width:${x/mx*100}%"></i></div></div>`).join(''):'<div class="mut">Sem gastos lançados neste mês.</div>';
   h+='</div>';
-  h+=`<div class="card"><h2>Dia de receber/investir</h2><div class="f2"><input id="pd" type="number" min="1" max="28" value="${S.cfg.payday}"><button onclick="S.cfg.payday=Math.min(28,Math.max(1,+pd.value||7));save()">Salvar</button></div></div>`;
+  h+=`<div class="card"><h2>Planilha e lembretes</h2><div class="f"><button onclick="exportXlsx()">Baixar planilha do mês</button><button onclick="exportIcs()">Criar lembretes no calendário</button><div class="k">Dias de lembrete para investir (separe por vírgula)</div><div class="f2"><input id="pd" value="${daysList().join(', ')}"><button onclick="S.cfg.days=pd.value;save()">Salvar</button></div></div></div>`;
   h+=`<div class="card"><h2>Backup</h2><div class="f2"><button onclick="exportar()">Exportar</button><button onclick="imp.click()">Importar</button></div><input id="imp" type="file" accept=".json" hidden onchange="importar(this.files[0])"><div class="mut" style="margin-top:6px">Use para levar seus dados entre celular e computador.</div></div>`;
   return h;
 }
@@ -128,6 +135,41 @@ function render(){
 }
 function exportar(){const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([JSON.stringify(S)],{type:'application/json'}));a.download='financas-'+iso(today())+'.json';a.click()}
 function importar(f){if(!f)return;const r=new FileReader();r.onload=()=>{try{const d=JSON.parse(r.result);if(!confirm('Isso substitui os dados deste aparelho. Continuar?'))return;S=Object.assign({tx:[],bills:[],goals:[],cfg:{payday:7}},d);save()}catch(e){alert('Arquivo inválido.')}};r.readAsText(f)}
+function exportXlsx(){
+  if(typeof XLSX==='undefined'){alert('A biblioteca da planilha não carregou. Abra o app com internet e tente de novo.');return}
+  const v=views(),mk=vm,money='R$ #,##0.00';
+  const by={};v.m.filter(t=>t.type==='gasto').forEach(t=>by[t.cat]=(by[t.cat]||0)+t.value);
+  const ent=Object.entries(by).sort((a,b)=>b[1]-a[1]),mx=ent.length?ent[0][1]:1;
+  const A=[['Resumo de '+mk],[],['Recebido',v.rec],['Gasto',v.gas],['Investido',v.inv],['Sobra (recebido - gasto - investido)',v.rec-v.gas-v.inv],['% da receita investida',v.rec?v.inv/v.rec:0],[],['Categoria','Gasto','% do gasto','Gráfico']];
+  ent.forEach(([c,x])=>A.push([c,x,v.gas?x/v.gas:0,'█'.repeat(Math.max(1,Math.round(x/mx*20)))]));
+  const w1=XLSX.utils.aoa_to_sheet(A);
+  ['B3','B4','B5','B6'].forEach(a=>w1[a].z=money);w1.B7.z='0.0%';
+  ent.forEach((_,i)=>{w1['B'+(10+i)].z=money;w1['C'+(10+i)].z='0.0%'});
+  w1['!cols']=[{wch:38},{wch:16},{wch:12},{wch:24}];
+  const L=[['Data','Tipo','Categoria','Descrição','Valor']];
+  [...v.m].sort((a,b)=>a.date.localeCompare(b.date)).forEach(t=>L.push([parse(t.date).toLocaleDateString('pt-BR'),t.type,t.type==='gasto'?t.cat:'',t.desc||'',t.value]));
+  const w2=XLSX.utils.aoa_to_sheet(L);for(let i=2;i<=L.length;i++)w2['E'+i].z=money;
+  w2['!cols']=[{wch:12},{wch:14},{wch:14},{wch:28},{wch:14}];
+  const B=[['Boleto','Vencimento','Valor','Situação']];
+  S.bills.filter(b=>monthKey(b.due)===mk).sort((a,b)=>a.due.localeCompare(b.due)).forEach(b=>B.push([b.name,parse(b.due).toLocaleDateString('pt-BR'),b.value,b.paid?'Pago':'Em aberto']));
+  const w3=XLSX.utils.aoa_to_sheet(B);for(let i=2;i<=B.length;i++)w3['C'+i].z=money;w3['!cols']=[{wch:24},{wch:12},{wch:14},{wch:12}];
+  const H={};S.tx.forEach(t=>{const k=monthKey(t.date);H[k]=H[k]||{r:0,g:0,i:0};H[k][t.type==='receita'?'r':t.type==='gasto'?'g':'i']+=t.value});
+  const R=[['Mês','Recebido','Gasto','Investido']];Object.keys(H).sort().forEach(k=>R.push([k,H[k].r,H[k].g,H[k].i]));
+  const w4=XLSX.utils.aoa_to_sheet(R);for(let i=2;i<=R.length;i++)['B','C','D'].forEach(c=>w4[c+i].z=money);w4['!cols']=[{wch:10},{wch:14},{wch:14},{wch:14}];
+  const wb=XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb,w1,'Resumo');XLSX.utils.book_append_sheet(wb,w2,'Lançamentos');XLSX.utils.book_append_sheet(wb,w3,'Boletos');XLSX.utils.book_append_sheet(wb,w4,'Histórico');
+  XLSX.writeFile(wb,'financas-'+mk+'.xlsx');
+}
+function exportIcs(){
+  const pad=n=>String(n).padStart(2,'0'),st=d=>d.getFullYear()+pad(d.getMonth()+1)+pad(d.getDate()),esc=t=>String(t).replace(/([,;\\])/g,'\\$1');
+  const L=['BEGIN:VCALENDAR','VERSION:2.0','PRODID:-//Financas//PT'];
+  const ev=(uid,title,d,rr,alarms)=>{L.push('BEGIN:VEVENT','UID:'+uid+'@financas','DTSTAMP:'+st(new Date())+'T000000Z','DTSTART:'+st(d)+'T090000','DTEND:'+st(d)+'T093000','SUMMARY:'+esc(title));if(rr)L.push(rr);alarms.forEach(a=>L.push('BEGIN:VALARM','ACTION:DISPLAY','DESCRIPTION:'+esc(title),'TRIGGER:'+a,'END:VALARM'));L.push('END:VEVENT')};
+  const t0=today();
+  daysList().forEach(p=>{let n=new Date(t0.getFullYear(),t0.getMonth(),p);if(n<t0)n=new Date(t0.getFullYear(),t0.getMonth()+1,p);ev('invest-'+p,'Guardar dinheiro para investir',n,'RRULE:FREQ=MONTHLY;BYMONTHDAY='+p,['PT0M'])});
+  S.bills.filter(b=>!b.paid&&dias(b.due)>=0).forEach(b=>ev('boleto-'+b.id,'Pagar boleto: '+b.name+' ('+brl(b.value)+')',parse(b.due),null,['-P1D','PT0M']));
+  L.push('END:VCALENDAR');
+  const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([L.join('\r\n')],{type:'text/calendar'}));a.download='lembretes-financas.ics';a.click();
+}
 if('serviceWorker' in navigator)navigator.serviceWorker.register('sw.js').catch(()=>{});
 init();
 </script>
