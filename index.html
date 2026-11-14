@@ -57,7 +57,6 @@ const CATS=['Moradia','Mercado','Transporte','Lazer','Saúde','Contas','Educaç�
 let S={tx:[],bills:[],goals:[],cfg:{payday:7}},tab='resumo',ref=null,loaded=false,note='';
 let KEY='financas-v1';
 let vm=iso(today()).slice(0,7),ed=null,PR=[],cur=null,gate=null,hiddenAt=0;
-async function hp(pin,id){try{const b=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(id+':'+pin));return [...new Uint8Array(b)].map(x=>x.toString(16).padStart(2,'0')).join('')}catch(e){return 'p:'+id+':'+pin}}
 function savePR(){try{localStorage.setItem('rcs-profiles',JSON.stringify(PR))}catch(e){}}
 let sb=null,user=null,syncMsg='',syncing=false,again=false,pt=null;
 try{const c=window.RCS_CFG||{};if(c.url&&c.key&&window.supabase)sb=window.supabase.createClient(c.url,c.key)}catch(e){}
@@ -128,32 +127,23 @@ function boot(){
   let last=null;try{last=localStorage.getItem('rcs-last')}catch(e){}
   const p=PR.find(x=>x.id===last)||(PR.length===1?PR[0]:null);
   if(!p){gate={m:'pick'};render();return}
-  if(p.pin){gate={m:'pin',p,v:''};render();return}
   openProfile(p);
 }
 function openProfile(p){cur=p;KEY=p.key;gate=null;try{localStorage.setItem('rcs-last',p.id)}catch(e){}S=DEF();vm=iso(today()).slice(0,7);tab='resumo';ed=null;loadLocal();syncNow()}
 const go=m=>{gate={m};render()};
-function pickP(id){const p=PR.find(x=>x.id===id);if(p.pin){gate={m:'pin',p,v:''};render()}else openProfile(p)}
-async function newP(){const n=pn.value.trim();if(!n)return;const pv=pp.value.trim();if(pv&&!/^\d{4}$/.test(pv)){alert('O PIN deve ter 4 números.');return}
-  const id='p'+uid(),p={id,name:n,key:'rcs-'+id,pin:pv?await hp(pv,id):null};PR.push(p);savePR();openProfile(p)}
-async function key(k){const g=gate;if(!g||g.m!=='pin')return;g.err=false;
-  if(k==='⌫')g.v=g.v.slice(0,-1);else if(g.v.length<4)g.v+=k;
-  if(g.v.length===4){const h=await hp(g.v,g.p.id);if(h===g.p.pin){openProfile(g.p);return}g.v='';g.err=true}
-  render()}
-async function setPin(){const v=pn2.value.trim();if(!/^\d{4}$/.test(v)){alert('O PIN deve ter 4 números.');return}cur.pin=await hp(v,cur.id);savePR();alert('PIN salvo.');render()}
-function rmPin(){cur.pin=null;savePR();render()}
-function lock(pick){gate=pick?{m:'pick'}:{m:'pin',p:cur,v:''};render()}
+function pickP(id){openProfile(PR.find(x=>x.id===id))}
+async function newP(){const n=pn.value.trim();if(!n)return;const id='p'+uid(),p={id,name:n,key:'rcs-'+id};PR.push(p);savePR();openProfile(p)}
+function lock(){gate={m:'pick'};render()}
 function delProfile(p,ask){p=p||cur;if(!confirm(ask||'Apagar este perfil e todos os dados dele neste aparelho?'))return;
   try{localStorage.removeItem(p.key);localStorage.removeItem('rcs-last')}catch(e){}
   PR=PR.filter(x=>x.id!==p.id);savePR();cur=null;S=DEF();gate=PR.length?{m:'pick'}:{m:'new'};render()}
 function gateHtml(){
   const g=gate;
   if(g.m==='login')return `<h1>Entrar na conta</h1><div class="card f"><input id="em" type="email" placeholder="E-mail"><input id="pw" type="password" placeholder="Senha"><div class="f2"><button onclick="gateIn('in')">Entrar</button><button class="s" style="width:100%" onclick="gateIn('up')">Criar conta</button></div><button class="s" style="width:100%" onclick="go('${PR.length?'pick':'new'}')">Voltar</button></div>`;
-  if(g.m==='pick')return `<h1>Quem é você?</h1><div class="card f">${PR.map(p=>`<button onclick="pickP('${p.id}')">${E(p.name)}${p.pin?' 🔒':''}</button>`).join('')}<button class="s" style="width:100%" onclick="go('new')">＋ Novo perfil</button></div>`;
-  if(g.m==='new')return `<h1>${PR.length?'Novo perfil':'Bem-vindo!'}</h1><div class="card f"><input id="pn" placeholder="Seu nome"><input id="pp" type="password" inputmode="numeric" maxlength="4" placeholder="PIN de 4 dígitos (opcional)"><button onclick="newP()">Criar perfil</button>${sb?`<button class="s" style="width:100%" onclick="go('login')">Já tenho conta (entrar)</button>`:''}${PR.length?`<button class="s" style="width:100%" onclick="go('pick')">Voltar</button>`:''}</div>`;
-  return `<h1>Olá, ${E(g.p.name)}</h1><div class="card" style="text-align:center"><div style="font-size:28px;letter-spacing:10px;margin:8px 0;min-height:40px">${'●'.repeat(g.v.length)}${'○'.repeat(4-g.v.length)}</div>${g.err?'<div class="red">PIN incorreto</div>':'<div class="mut">Digite seu PIN</div>'}<div class="grid" style="margin-top:12px">${[1,2,3,4,5,6,7,8,9,'',0,'⌫'].map(k=>k===''?'<div></div>':`<button onclick="key('${k}')" style="padding:16px">${k}</button>`).join('')}</div><div style="margin-top:12px"><button class="s" onclick="go('pick')">Trocar de perfil</button> <button class="s" onclick="delProfile(gate.p,'Esqueci o PIN: isso APAGA os dados deste perfil neste aparelho. Continuar?')">Esqueci o PIN</button></div></div>`;
+  if(g.m==='pick')return `<h1>Quem é você?</h1><div class="card f">${PR.map(p=>`<button onclick="pickP('${p.id}')">${E(p.name)}</button>`).join('')}<button class="s" style="width:100%" onclick="go('new')">＋ Novo perfil</button></div>`;
+  if(g.m==='new')return `<h1>${PR.length?'Novo perfil':'Bem-vindo!'}</h1><div class="card f"><input id="pn" placeholder="Seu nome"><button onclick="newP()">Criar perfil</button>${sb?`<button class="s" style="width:100%" onclick="go('login')">Já tenho conta (entrar)</button>`:''}${PR.length?`<button class="s" style="width:100%" onclick="go('pick')">Voltar</button>`:''}</div>`;
 }
-document.addEventListener('visibilitychange',()=>{if(document.hidden){hiddenAt=Date.now();if(pt){clearTimeout(pt);pt=null;syncNow()}}else{if(cur&&cur.pin&&!gate&&Date.now()-hiddenAt>60000)lock(false);syncNow()}});
+document.addEventListener('visibilitychange',()=>{if(document.hidden){hiddenAt=Date.now();if(pt){clearTimeout(pt);pt=null;syncNow()}}else{syncNow()}});
 window.addEventListener('online',()=>syncNow());
 const tot=mk=>{const o={r:0,g:0,i:0};S.tx.forEach(t=>{if(monthKey(t.date)===mk)o[t.type==='receita'?'r':t.type==='gasto'?'g':'i']+=t.value});return o};
 const addM=(mk,n)=>{const [y,m]=mk.split('-').map(Number);return iso(new Date(y,m-1+n,1)).slice(0,7)};
@@ -237,7 +227,7 @@ function resumo(){
   h+=`<div class="card"><h2>Limites por categoria (mensal)</h2><div class="f">${CATS.map((c,i)=>`<div class="f2"><span style="align-self:center">${c}</span><input id="lm${i}" type="number" inputmode="decimal" placeholder="sem limite" value="${lim[c]||''}"></div>`).join('')}<button onclick="saveLim()">Salvar limites</button></div></div>`;
   h+=`<div class="card"><h2>Planilha e lembretes</h2><div class="f"><button onclick="exportXlsx()">Baixar planilha do mês</button><button onclick="exportIcs()">Criar lembretes no calendário</button><div class="k">Dias de lembrete para investir (separe por vírgula)</div><div class="f2"><input id="pd" value="${daysList().join(', ')}"><button onclick="S.cfg.days=pd.value;save()">Salvar</button></div></div></div>`;
   h+=syncCard();
-  h+=`<div class="card"><h2>Perfil: ${E(cur?cur.name:'')}</h2><div class="f"><input id="pn2" type="password" inputmode="numeric" maxlength="4" placeholder="${cur&&cur.pin?'Novo PIN (4 dígitos)':'Criar PIN (4 dígitos)'}"><div class="f2"><button onclick="setPin()">Salvar PIN</button>${cur&&cur.pin?'<button class="s" style="width:100%" onclick="rmPin()">Remover PIN</button>':'<div></div>'}</div><button class="s" style="width:100%" onclick="lock(true)">Trocar de perfil</button><button class="s" style="width:100%" onclick="delProfile()">Apagar este perfil</button></div></div>`;
+  h+=`<div class="card"><h2>Perfil: ${E(cur?cur.name:'')}</h2><div class="f"><button class="s" style="width:100%" onclick="lock()">Trocar de perfil</button><button class="s" style="width:100%" onclick="delProfile()">Apagar este perfil</button></div></div>`;
   h+=`<div class="card"><h2>Backup</h2><div class="f2"><button onclick="exportar()">Exportar</button><button onclick="imp.click()">Importar</button></div><input id="imp" type="file" accept=".json" hidden onchange="importar(this.files[0])"><div class="mut" style="margin-top:6px">Use para levar seus dados entre celular e computador.</div></div>`;
   return h;
 }
