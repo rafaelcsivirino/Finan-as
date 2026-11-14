@@ -38,12 +38,18 @@ nav button{background:none;color:var(--mut);border-radius:0;padding:12px 4px;fon
 nav button.on{color:var(--pri)}
 .bar i.w{background:#d97706}.bar i.r{background:var(--red)}
 .red{color:var(--red)}.grn{color:var(--grn)}.mut{color:var(--mut);font-size:13px}
-.brand{background:#0c0d12;border-radius:12px;margin:14px 14px 0;display:flex;justify-content:center;padding:6px}.brand img{display:block;width:100%;max-width:300px;height:auto}
+.brand{background:#0c0d12;border-radius:12px;margin:14px 14px 0;display:flex;flex-direction:column;align-items:center;padding:6px}.brand img{display:block;width:100%;max-width:300px;height:auto}
 @media(min-width:680px){.brand{max-width:612px;margin:14px auto 0}}
+.tools{align-self:flex-end;display:flex;gap:6px;position:relative;padding:2px 2px 4px}.tools>button{width:32px;height:32px;padding:0;font-size:16px;border-radius:50%;background:rgba(255,255,255,.14);border:0;color:#fff}
+.menu{position:absolute;top:38px;right:0;background:var(--card);border:1px solid var(--bd);border-radius:10px;padding:6px;display:grid;gap:4px;min-width:170px;z-index:5}.menu[hidden]{display:none}.menu button{width:auto;background:transparent;color:var(--tx);font-size:14px;padding:8px 10px;text-align:left;font-weight:500}
 </style>
 </head>
 <body>
-<div class="brand"><img src="logo.png" alt="RCS Finance"></div>
+<div class="brand">
+<div class="tools" id="tools" style="display:none"><button title="Baixar planilha do mês" aria-label="Baixar planilha do mês" onclick="exportXlsx()">📊</button><button title="Backup" aria-label="Backup" onclick="toggleBk()">💾</button><div class="menu" id="bkmenu" hidden><button onclick="exportar();toggleBk()">Exportar backup</button><button onclick="imp.click();toggleBk()">Importar backup</button></div></div>
+<img src="logo.png" alt="RCS Finance">
+<input id="imp" type="file" accept=".json" hidden onchange="importar(this.files[0]);this.value=''">
+</div>
 <main id="app"></main>
 <nav id="nav"></nav>
 <script>
@@ -121,6 +127,16 @@ function ntfyCard(){
   const t=S.cfg&&S.cfg.ntfy;
   if(!t)return `<div class="card"><h2>Notificações</h2><div class="mut" style="margin-bottom:8px">Receba avisos no celular, mesmo com o app fechado: dia de investir e boletos (hoje, amanhã e atrasados).</div><button onclick="ntfyOn()">Ativar notificações</button></div>`;
   return `<div class="card"><h2>Notificações</h2><div class="mut">1) Instale o app <b>ntfy</b> (Play Store ou App Store).<br>2) Abra, toque em <b>+</b> e digite este tópico:</div><div style="margin:8px 0;padding:10px;border-radius:8px;border:1px dashed var(--bd);word-break:break-all;user-select:all"><b>${E(t)}</b></div><div class="mut" style="margin-bottom:8px">Trate o tópico como uma senha: não compartilhe. O aviso sai todo dia às 8h${cur&&cur.acct?'':' — <b>só funciona com a sincronização ligada</b> (crie a conta no card abaixo)'}.</div><div class="f2"><button onclick="ntfyTest()">Enviar teste</button><button class="s" style="width:100%" onclick="ntfyCopy()">Copiar tópico</button></div><button class="s" style="width:100%;margin-top:8px" onclick="ntfyOff()">Desativar</button></div>`;
+}
+const getCats=()=>(S.cats&&S.cats.length?S.cats:CATS);
+let catOpen=false;
+function collectLim(){const L={};getCats().forEach((c,i)=>{const el=document.getElementById('lm'+i),v=el?parseFloat(el.value):(S.limits||{})[c];if(v>0)L[c]=v});S.limits=L}
+function saveLim(){collectLim();save()}
+function addCat(){const n=(document.getElementById('nc').value||'').trim();if(!n)return;if(getCats().some(c=>c.toLowerCase()===n.toLowerCase())){alert('Essa categoria já existe.');return}collectLim();S.cats=[...getCats(),n];save()}
+function delCat(i){const c=getCats()[i];if(getCats().length<=1){alert('Mantenha pelo menos uma categoria.');return}if(!confirm('Remover a categoria "'+c+'"? Lançamentos antigos continuam com ela.'))return;collectLim();delete S.limits[c];S.cats=getCats().filter((_,j)=>j!==i);save()}
+function catCard(){
+  const lim=S.limits||{};
+  return `<details class="card" ${catOpen?'open':''} ontoggle="catOpen=this.open"><summary style="cursor:pointer;font-weight:600">Categorias e limites</summary><div class="mut" style="margin:8px 0">Defina um limite mensal (opcional) e adicione ou remova categorias.</div><div class="f">${getCats().map((c,i)=>`<div style="display:grid;grid-template-columns:1fr 110px auto;gap:6px;align-items:center"><span>${E(c)}</span><input id="lm${i}" type="number" inputmode="decimal" placeholder="sem limite" value="${lim[c]||''}"><button class="s" onclick="delCat(${i})">✕</button></div>`).join('')}<button onclick="saveLim()">Salvar limites</button><div class="f2"><input id="nc" placeholder="Nova categoria"><button class="s" style="width:100%" onclick="addCat()">Adicionar</button></div></div></details>`;
 }
 function syncCard(){
   if(!sb)return `<div class="card"><h2>Sincronização</h2><div class="mut">Ainda não configurada neste site.</div></div>`;
@@ -233,19 +249,18 @@ function resumo(){
   h+=cats.length?cats.map(c=>{const x=by[c]||0,l=lim[c]>0?lim[c]:0,p=l?x/l*100:0,cl=!l?'':p>=100?'r':p>=80?'w':'';
     return `<div style="margin-bottom:10px"><div class="row" style="border:0;padding:0"><span>${c}</span><b>${brl(x)}${l?' <span class="mut">/ '+brl(l)+'</span>':''}</b></div><div class="bar"><i class="${cl}" style="width:${l?Math.min(100,p):x/mx*100}%"></i></div>${l?`<div class="mut">${Math.round(p)}% do limite</div>`:''}</div>`}).join(''):'<div class="mut">Sem gastos lançados neste mês.</div>';
   h+='</div>';
-  h+=`<div class="card"><h2>Limites por categoria (mensal)</h2><div class="f">${CATS.map((c,i)=>`<div class="f2"><span style="align-self:center">${c}</span><input id="lm${i}" type="number" inputmode="decimal" placeholder="sem limite" value="${lim[c]||''}"></div>`).join('')}<button onclick="saveLim()">Salvar limites</button></div></div>`;
-  h+=`<div class="card"><h2>Planilha e lembretes</h2><div class="f"><button onclick="exportXlsx()">Baixar planilha do mês</button><button onclick="exportIcs()">Criar lembretes no calendário</button><div class="k">Dias de lembrete para investir (separe por vírgula)</div><div class="f2"><input id="pd" value="${daysList().join(', ')}"><button onclick="S.cfg.days=pd.value;save()">Salvar</button></div></div></div>`;
+  h+=catCard();
+  h+=`<div class="card"><h2>Lembrete de investimento</h2><div class="k">Dias do mês para guardar dinheiro (separe por vírgula)</div><div class="f2" style="margin-top:6px"><input id="pd" value="${daysList().join(', ')}"><button onclick="S.cfg.days=pd.value;save()">Salvar</button></div></div>`;
   h+=ntfyCard();
   h+=syncCard();
   h+=`<div class="card"><h2>Perfil: ${E(cur?cur.name:'')}</h2><div class="f"><button class="s" style="width:100%" onclick="lock()">Trocar de perfil</button><button class="s" style="width:100%" onclick="delProfile()">Apagar este perfil</button></div></div>`;
-  h+=`<div class="card"><h2>Backup</h2><div class="f2"><button onclick="exportar()">Exportar</button><button onclick="imp.click()">Importar</button></div><input id="imp" type="file" accept=".json" hidden onchange="importar(this.files[0])"><div class="mut" style="margin-top:6px">Use para levar seus dados entre celular e computador.</div></div>`;
   return h;
 }
 function lancar(){
   const e=ed?S.tx.find(t=>t.id===ed):null,sel=(v,x)=>v===x?' selected':'';
   let h=`<h1>${e?'Editar lançamento':'Lançar'}</h1><div class="card f"><select id="ty">${[['gasto','Gasto'],['investimento','Investimento'],['receita','Receita']].map(([k,n])=>`<option value="${k}"${sel(e&&e.type,k)}>${n}</option>`).join('')}</select>
   <div class="f2"><input id="vl" type="number" inputmode="decimal" step="0.01" placeholder="Valor (R$)" value="${e?e.value:''}"><input id="dt" type="date" value="${e?e.date:iso(today())}"></div>
-  <select id="ct">${CATS.map(c=>`<option${sel(e&&e.cat,c)}>${c}</option>`).join('')}</select><input id="ds" placeholder="Descrição (opcional)" value="${e?E(e.desc||''):''}">
+  <select id="ct">${[...new Set([...getCats(),...(e&&e.cat?[e.cat]:[])])].map(c=>`<option${sel(e&&e.cat,c)}>${c}</option>`).join('')}</select><input id="ds" placeholder="Descrição (opcional)" value="${e?E(e.desc||''):''}">
   <button onclick="addTx()">${e?'Salvar alteração':'Adicionar'}</button>${e?'<button class="s" style="width:100%" onclick="cancelEd()">Cancelar edição</button>':''}</div><div class="card"><h2>Últimos lançamentos</h2>`;
   const l=[...S.tx].sort((a,b)=>b.date.localeCompare(a.date)).slice(0,25);
   h+=l.length?l.map(t=>`<div class="row"><div><div>${E(t.desc||t.cat)}</div><div class="mut">${parse(t.date).toLocaleDateString('pt-BR')} · ${t.type==='gasto'?t.cat:t.type}</div></div><div style="text-align:right"><b class="${t.type==='gasto'?'red':'grn'}">${t.type==='gasto'?'−':'+'}${brl(t.value)}</b><br><button class="s" onclick="editTx('${t.id}')">✎</button> <button class="s" onclick="delTx('${t.id}')">✕</button></div></div>`).join(''):'<div class="mut">Nada lançado ainda.</div>';
@@ -255,7 +270,6 @@ function addTx(){const v=parseFloat(vl.value);if(!(v>0))return;const o={type:ty.
   if(ed){const t=S.tx.find(x=>x.id===ed);if(t)Object.assign(t,o);ed=null}else S.tx.push(Object.assign({id:uid()},o));save()}
 function editTx(i){ed=i;tab='lancar';render();scrollTo(0,0)}
 function cancelEd(){ed=null;render()}
-function saveLim(){S.limits={};CATS.forEach((c,i)=>{const v=parseFloat(document.getElementById('lm'+i).value);if(v>0)S.limits[c]=v});save()}
 function delTx(i){S.tx=S.tx.filter(t=>t.id!==i);save()}
 function boletos(){
   let h=`<h1>Boletos</h1><div class="card f"><input id="bn" placeholder="Nome (ex.: Internet)"><div class="f2"><input id="bv" type="number" inputmode="decimal" step="0.01" placeholder="Valor (R$)"><input id="bd" type="date"></div><button onclick="addBill()">Cadastrar boleto</button></div><div class="card">`;
@@ -279,6 +293,7 @@ function metas(){
 function addGoal(){const t=parseFloat(gt.value);if(!gn.value.trim()||!(t>0)||!gd.value)return;S.goals.push({id:uid(),name:gn.value.trim(),target:t,date:gd.value,saved:parseFloat(gs.value)||0,rate:parseFloat(gr.value)||0});save()}
 function delGoal(i){S.goals=S.goals.filter(g=>g.id!==i);save()}
 function render(){
+  const tl=document.getElementById('tools');if(tl&&tl.style)tl.style.display=gate?'none':'flex';
   if(gate){document.getElementById('app').innerHTML=gateHtml();document.getElementById('nav').innerHTML='';return}
   const a=document.getElementById('app');
   const act=document.activeElement&&document.activeElement.id;
@@ -286,6 +301,8 @@ function render(){
   else a.innerHTML=({resumo,lancar,boletos,metas,graficos})[tab]()+(note?`<div class="mut">${note}</div>`:'');
   document.getElementById('nav').innerHTML=[['resumo','📊','Resumo'],['lancar','➕','Lançar'],['boletos','🧾','Boletos'],['metas','🎯','Metas'],['graficos','📈','Gráficos']].map(([k,i,n])=>`<button class="${tab===k?'on':''}" onclick="tab='${k}';render();scrollTo(0,0)">${i}<br>${n}</button>`).join('');
 }
+function toggleBk(){const m=document.getElementById('bkmenu');m.hidden=!m.hidden}
+document.addEventListener('click',e=>{const m=document.getElementById('bkmenu');if(m&&!m.hidden&&e.target.closest&&!e.target.closest('#tools'))m.hidden=true});
 function exportar(){const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([JSON.stringify(S)],{type:'application/json'}));a.download='financas-'+iso(today())+'.json';a.click()}
 function importar(f){if(!f)return;const r=new FileReader();r.onload=()=>{try{const d=JSON.parse(r.result);if(!confirm('Isso substitui os dados deste aparelho. Continuar?'))return;S=Object.assign(DEF(),d);genRec();save()}catch(e){alert('Arquivo inválido.')}};r.readAsText(f)}
 function exportXlsx(){
@@ -312,16 +329,6 @@ function exportXlsx(){
   const wb=XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb,w1,'Resumo');XLSX.utils.book_append_sheet(wb,w2,'Lançamentos');XLSX.utils.book_append_sheet(wb,w3,'Boletos');XLSX.utils.book_append_sheet(wb,w4,'Histórico');
   XLSX.writeFile(wb,'financas-'+mk+'.xlsx');
-}
-function exportIcs(){
-  const pad=n=>String(n).padStart(2,'0'),st=d=>d.getFullYear()+pad(d.getMonth()+1)+pad(d.getDate()),esc=t=>String(t).replace(/([,;\\])/g,'\\$1');
-  const L=['BEGIN:VCALENDAR','VERSION:2.0','PRODID:-//Financas//PT'];
-  const ev=(uid,title,d,rr,alarms)=>{L.push('BEGIN:VEVENT','UID:'+uid+'@financas','DTSTAMP:'+st(new Date())+'T000000Z','DTSTART:'+st(d)+'T090000','DTEND:'+st(d)+'T093000','SUMMARY:'+esc(title));if(rr)L.push(rr);alarms.forEach(a=>L.push('BEGIN:VALARM','ACTION:DISPLAY','DESCRIPTION:'+esc(title),'TRIGGER:'+a,'END:VALARM'));L.push('END:VEVENT')};
-  const t0=today();
-  daysList().forEach(p=>{let n=new Date(t0.getFullYear(),t0.getMonth(),p);if(n<t0)n=new Date(t0.getFullYear(),t0.getMonth()+1,p);ev('invest-'+p,'Guardar dinheiro para investir',n,'RRULE:FREQ=MONTHLY;BYMONTHDAY='+p,['PT0M'])});
-  S.bills.filter(b=>!b.paid&&dias(b.due)>=0).forEach(b=>ev('boleto-'+b.id,'Pagar boleto: '+b.name+' ('+brl(b.value)+')',parse(b.due),null,['-P1D','PT0M']));
-  L.push('END:VCALENDAR');
-  const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([L.join('\r\n')],{type:'text/calendar'}));a.download='lembretes-financas.ics';a.click();
 }
 if('serviceWorker' in navigator)navigator.serviceWorker.register('sw.js').catch(()=>{});
 init();
