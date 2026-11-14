@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Minhas Finanças</title>
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#0f766e">
+<link rel="icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-192.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Finanças">
+<style>
+:root{--bg:#f6f7f9;--card:#fff;--tx:#1b1f24;--mut:#6b7480;--bd:#e3e6ea;--pri:#0f766e;--red:#c2410c;--grn:#15803d;--warn:#fef3c7;--warnt:#78350f;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){color-scheme:dark;--bg:#111418;--card:#1b2026;--tx:#e8ebee;--mut:#98a2ae;--bd:#2c333b;--pri:#2dd4bf;--red:#fb923c;--grn:#4ade80;--warn:#3b2f0a;--warnt:#fde68a}}
+:root[data-theme="dark"]{color-scheme:dark;--bg:#111418;--card:#1b2026;--tx:#e8ebee;--mut:#98a2ae;--bd:#2c333b;--pri:#2dd4bf;--red:#fb923c;--grn:#4ade80;--warn:#3b2f0a;--warnt:#fde68a}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--tx);font:16px/1.4 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;padding-bottom:76px}
+main{max-width:640px;margin:0 auto;padding:14px}
+h1{font-size:20px;margin:4px 0 12px}h2{font-size:16px;margin:0 0 8px}
+.card{background:var(--card);border:1px solid var(--bd);border-radius:12px;padding:14px;margin-bottom:12px}
+.alert{background:var(--warn);color:var(--warnt);border-radius:10px;padding:10px 12px;margin-bottom:8px;font-size:15px}
+.grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.k{font-size:12px;color:var(--mut)}.v{font-weight:700;font-size:15px}
+.row{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:8px 0;border-top:1px solid var(--bd)}
+.row:first-of-type{border-top:0}
+.bar{height:8px;border-radius:4px;background:var(--bd);overflow:hidden;margin-top:4px}.bar i{display:block;height:100%;background:var(--pri)}
+input,select,button{font:inherit;padding:10px;border-radius:8px;border:1px solid var(--bd);background:var(--card);color:var(--tx);width:100%}
+button{background:var(--pri);color:#fff;border:0;font-weight:600;cursor:pointer}
+button.s{width:auto;padding:6px 10px;font-size:13px;background:transparent;color:var(--mut);border:1px solid var(--bd)}
+.f{display:grid;gap:8px}.f2{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+nav{position:fixed;left:0;right:0;bottom:0;display:flex;background:var(--card);border-top:1px solid var(--bd);padding-bottom:env(safe-area-inset-bottom,0px)}
+nav button{background:none;color:var(--mut);border-radius:0;padding:12px 4px;font-size:13px}
+nav button.on{color:var(--pri)}
+.red{color:var(--red)}.grn{color:var(--grn)}.mut{color:var(--mut);font-size:13px}
+</style>
+</head>
+<body>
+<main id="app"></main>
+<nav id="nav"></nav>
+<script>
+const brl=n=>(n||0).toLocaleString('pt-BR',{style:'currency',currency:'BRL'});
+const iso=d=>d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+const today=()=>{const d=new Date();d.setHours(0,0,0,0);return d};
+const parse=s=>{const [y,m,d]=s.split('-').map(Number);return new Date(y,m-1,d)};
+const dias=s=>Math.round((parse(s)-today())/864e5);
+const uid=()=>Math.random().toString(36).slice(2,9);
+const CATS=['Moradia','Mercado','Transporte','Lazer','Saúde','Contas','Educação','Outros'];
+let S={tx:[],bills:[],goals:[],cfg:{payday:7}},tab='resumo',ref=null,loaded=false,note='';
+const KEY='financas-v1';
+
+function init(){loadLocal()}
+function loadLocal(){
+  loaded=true;note='Salvando só neste aparelho (sem sincronização).';
+  try{const r=localStorage.getItem(KEY);if(r)S=JSON.parse(r)}catch(e){}
+  render();
+}
+function save(){
+  render();
+  try{localStorage.setItem(KEY,JSON.stringify(S))}catch(e){}
+}
+const monthKey=s=>s.slice(0,7);
+function nextPayday(){
+  const d=today(),p=S.cfg.payday||7;let n=new Date(d.getFullYear(),d.getMonth(),p);
+  if(n<d)n=new Date(d.getFullYear(),d.getMonth()+1,p);return n;
+}
+function pmt(g){
+  const n=Math.max(1,Math.ceil((parse(g.date)-today())/(864e5*30.4))),r=(g.rate||0)/100,saved=g.saved||0;
+  if(r>0){const f=Math.pow(1+r,n);return Math.max(0,(g.target-saved*f)*r/(f-1))}
+  return Math.max(0,(g.target-saved)/n);
+}
+function views(){
+  const mk=iso(today()).slice(0,7),m=S.tx.filter(t=>monthKey(t.date)===mk);
+  const sum=ty=>m.filter(t=>t.type===ty).reduce((a,t)=>a+t.value,0);
+  return {mk,rec:sum('receita'),gas:sum('gasto'),inv:sum('investimento'),m};
+}
+function resumo(){
+  const v=views(),np=nextPayday(),dp=Math.round((np-today())/864e5);
+  let h='<h1>Resumo do mês</h1>';
+  h+=`<div class="alert">${dp===0?'💰 Hoje é dia '+S.cfg.payday+': hora de investir!':'📅 Próximo dia de investir ('+np.toLocaleDateString('pt-BR')+'): faltam '+dp+' dia(s).'}</div>`;
+  const open=S.bills.filter(b=>!b.paid).sort((a,b)=>a.due.localeCompare(b.due));
+  open.filter(b=>dias(b.due)<=3).forEach(b=>{const d=dias(b.due);h+=`<div class="alert">${d<0?'⚠️ Atrasado':'🔔'} ${b.name} (${brl(b.value)}) ${d<0?'venceu há '+(-d)+' dia(s)':d===0?'vence hoje':'vence em '+d+' dia(s)'}</div>`});
+  S.goals.forEach(g=>{h+=`<div class="alert">🎯 ${g.name}: invista ${brl(pmt(g))} neste mês.</div>`});
+  h+=`<div class="card grid"><div><div class="k">Recebido</div><div class="v grn">${brl(v.rec)}</div></div><div><div class="k">Gasto</div><div class="v red">${brl(v.gas)}</div></div><div><div class="k">Investido</div><div class="v">${brl(v.inv)}</div></div></div>`;
+  const by={};v.m.filter(t=>t.type==='gasto').forEach(t=>by[t.cat]=(by[t.cat]||0)+t.value);
+  const ent=Object.entries(by).sort((a,b)=>b[1]-a[1]),mx=ent.length?ent[0][1]:1;
+  h+='<div class="card"><h2>Onde você mais gastou</h2>';
+  h+=ent.length?ent.map(([c,x])=>`<div style="margin-bottom:8px"><div class="row" style="border:0;padding:0"><span>${c}</span><b>${brl(x)}</b></div><div class="bar"><i style="width:${x/mx*100}%"></i></div></div>`).join(''):'<div class="mut">Sem gastos lançados neste mês.</div>';
+  h+='</div>';
+  h+=`<div class="card"><h2>Dia de receber/investir</h2><div class="f2"><input id="pd" type="number" min="1" max="28" value="${S.cfg.payday}"><button onclick="S.cfg.payday=Math.min(28,Math.max(1,+pd.value||7));save()">Salvar</button></div></div>`;
+  h+=`<div class="card"><h2>Backup</h2><div class="f2"><button onclick="exportar()">Exportar</button><button onclick="imp.click()">Importar</button></div><input id="imp" type="file" accept=".json" hidden onchange="importar(this.files[0])"><div class="mut" style="margin-top:6px">Use para levar seus dados entre celular e computador.</div></div>`;
+  return h;
+}
+function lancar(){
+  let h=`<h1>Lançar</h1><div class="card f"><select id="ty"><option value="gasto">Gasto</option><option value="investimento">Investimento</option><option value="receita">Receita</option></select>
+  <div class="f2"><input id="vl" type="number" inputmode="decimal" step="0.01" placeholder="Valor (R$)"><input id="dt" type="date" value="${iso(today())}"></div>
+  <select id="ct">${CATS.map(c=>`<option>${c}</option>`).join('')}</select><input id="ds" placeholder="Descrição (opcional)">
+  <button onclick="addTx()">Adicionar</button></div><div class="card"><h2>Últimos lançamentos</h2>`;
+  const l=[...S.tx].sort((a,b)=>b.date.localeCompare(a.date)).slice(0,25);
+  h+=l.length?l.map(t=>`<div class="row"><div><div>${t.desc||t.cat}</div><div class="mut">${parse(t.date).toLocaleDateString('pt-BR')} · ${t.type==='gasto'?t.cat:t.type}</div></div><div><b class="${t.type==='gasto'?'red':'grn'}">${t.type==='gasto'?'−':'+'}${brl(t.value)}</b> <button class="s" onclick="delTx('${t.id}')">✕</button></div></div>`).join(''):'<div class="mut">Nada lançado ainda.</div>';
+  return h+'</div>';
+}
+function addTx(){const v=parseFloat(vl.value);if(!(v>0))return;S.tx.push({id:uid(),type:ty.value,value:v,date:dt.value||iso(today()),cat:ct.value,desc:ds.value.trim()});save()}
+function delTx(i){S.tx=S.tx.filter(t=>t.id!==i);save()}
+function boletos(){
+  let h=`<h1>Boletos</h1><div class="card f"><input id="bn" placeholder="Nome (ex.: Internet)"><div class="f2"><input id="bv" type="number" inputmode="decimal" step="0.01" placeholder="Valor (R$)"><input id="bd" type="date"></div><button onclick="addBill()">Cadastrar boleto</button></div><div class="card">`;
+  const l=[...S.bills].sort((a,b)=>(a.paid-b.paid)||a.due.localeCompare(b.due));
+  h+=l.length?l.map(b=>{const d=dias(b.due);return `<div class="row"><div><div>${b.paid?'✅ ':''}${b.name} · <b>${brl(b.value)}</b></div><div class="mut ${!b.paid&&d<0?'red':''}">${parse(b.due).toLocaleDateString('pt-BR')}${b.paid?' · pago':d<0?' · atrasado':d===0?' · hoje':' · em '+d+' dia(s)'}</div></div><div>${b.paid?'':`<button class="s" onclick="payBill('${b.id}')">Paguei</button> `}<button class="s" onclick="delBill('${b.id}')">✕</button></div></div>`}).join(''):'<div class="mut">Nenhum boleto cadastrado.</div>';
+  return h+'</div>';
+}
+function addBill(){const v=parseFloat(bv.value);if(!bn.value.trim()||!(v>0)||!bd.value)return;S.bills.push({id:uid(),name:bn.value.trim(),value:v,due:bd.value,paid:false});save()}
+function payBill(i){const b=S.bills.find(x=>x.id===i);b.paid=true;S.tx.push({id:uid(),type:'gasto',value:b.value,date:iso(today()),cat:'Contas',desc:b.name});save()}
+function delBill(i){S.bills=S.bills.filter(b=>b.id!==i);save()}
+function metas(){
+  let h=`<h1>Metas</h1><div class="card f"><input id="gn" placeholder="Meta (ex.: Viagem)"><div class="f2"><input id="gt" type="number" inputmode="decimal" placeholder="Valor alvo (R$)"><input id="gd" type="date"></div><div class="f2"><input id="gs" type="number" inputmode="decimal" placeholder="Já tenho (R$)"><input id="gr" type="number" step="0.01" placeholder="Rendimento % ao mês"></div><button onclick="addGoal()">Criar meta</button></div>`;
+  h+=S.goals.map(g=>`<div class="card"><div class="row" style="border:0;padding:0"><h2>${g.name}</h2><button class="s" onclick="delGoal('${g.id}')">✕</button></div><div class="mut">${brl(g.target)} até ${parse(g.date).toLocaleDateString('pt-BR')}</div><div style="margin-top:6px">Invista por mês: <b>${brl(pmt(g))}</b></div></div>`).join('');
+  return h;
+}
+function addGoal(){const t=parseFloat(gt.value);if(!gn.value.trim()||!(t>0)||!gd.value)return;S.goals.push({id:uid(),name:gn.value.trim(),target:t,date:gd.value,saved:parseFloat(gs.value)||0,rate:parseFloat(gr.value)||0});save()}
+function delGoal(i){S.goals=S.goals.filter(g=>g.id!==i);save()}
+function render(){
+  const a=document.getElementById('app');
+  const act=document.activeElement&&document.activeElement.id;
+  if(!loaded){a.innerHTML='<div class="mut" style="padding:30px;text-align:center">Carregando…</div>'}
+  else a.innerHTML=({resumo,lancar,boletos,metas})[tab]()+(note?`<div class="mut">${note}</div>`:'');
+  document.getElementById('nav').innerHTML=[['resumo','📊','Resumo'],['lancar','➕','Lançar'],['boletos','🧾','Boletos'],['metas','🎯','Metas']].map(([k,i,n])=>`<button class="${tab===k?'on':''}" onclick="tab='${k}';render();scrollTo(0,0)">${i}<br>${n}</button>`).join('');
+}
+function exportar(){const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([JSON.stringify(S)],{type:'application/json'}));a.download='financas-'+iso(today())+'.json';a.click()}
+function importar(f){if(!f)return;const r=new FileReader();r.onload=()=>{try{const d=JSON.parse(r.result);if(!confirm('Isso substitui os dados deste aparelho. Continuar?'))return;S=Object.assign({tx:[],bills:[],goals:[],cfg:{payday:7}},d);save()}catch(e){alert('Arquivo inválido.')}};r.readAsText(f)}
+if('serviceWorker' in navigator)navigator.serviceWorker.register('sw.js').catch(()=>{});
+init();
+</script>
+</body>
+</html>
