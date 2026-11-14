@@ -237,8 +237,20 @@ function nextPayday(){
   daysList().forEach(p=>{let n=new Date(d.getFullYear(),d.getMonth(),p);if(n<d)n=new Date(d.getFullYear(),d.getMonth()+1,p);if(!best||n<best)best=n});
   return best||new Date(d.getFullYear(),d.getMonth()+1,7);
 }
+const gRate=g=>g.rateA>0?Math.pow(1+g.rateA/100,1/12)-1:(g.rate||0)/100;
+const gBal=g=>(g.saved||0)+(g.deps||[]).reduce((a,d)=>a+d.value,0);
+function gEta(g){
+  const t=g.target,b=gBal(g),p=g.plan||0,r=gRate(g);
+  if(b>=t)return {done:true};
+  if(!(p>0))return null;
+  const n=r>0?Math.ceil(Math.log((t+p/r)/(b+p/r))/Math.log(1+r)):Math.ceil((t-b)/p);
+  if(!isFinite(n)||n<1||n>600)return null;
+  return {n,d:new Date(today().getFullYear(),today().getMonth()+n,1)};
+}
+const mon=d=>d.toLocaleDateString('pt-BR',{month:'short',year:'numeric'}).replace('.','').replace(' de ','/');
 function pmt(g){
-  const n=Math.max(1,Math.ceil((parse(g.date)-today())/(864e5*30.4))),r=(g.rate||0)/100,saved=g.saved||0;
+  if(!g.date)return 0;
+  const n=Math.max(1,Math.ceil((parse(g.date)-today())/(864e5*30.4))),r=gRate(g),saved=gBal(g);
   if(r>0){const f=Math.pow(1+r,n);return Math.max(0,(g.target-saved*f)*r/(f-1))}
   return Math.max(0,(g.target-saved)/n);
 }
@@ -261,7 +273,7 @@ function avisos(v){
     if(p>=100)A.push({p:2,h:`🚨 ${E(c)}: passou do limite (${brl(x)} de ${brl(l)})`});
     else if(p>=80)A.push({p:4,h:`⚠️ ${E(c)}: ${Math.round(p)}% do limite (${brl(x)} de ${brl(l)})`})})}
   A.push(dp===0?{p:2.5,h:`💰 Hoje é dia ${np.getDate()}: hora de guardar dinheiro para investir!`}:{p:6,h:`📅 Próximo dia de investir (${np.toLocaleDateString('pt-BR')}): faltam ${dp} dia(s)`});
-  S.goals.forEach(g=>A.push({p:7,h:`🎯 ${E(g.name)}: invista ${brl(pmt(g))} neste mês`,a:"go2('metas')"}));
+  S.goals.forEach(g=>{const e=gEta(g);if(e&&e.done)return;const x=g.plan>0?g.plan:pmt(g);A.push({p:7,h:`🎯 ${E(g.name)}: ${x>0?'guarde '+brl(x)+' · ':''}${brl(gBal(g))} de ${brl(g.target)}`,a:"go2('metas')"})});
   return A.sort((a,b)=>a.p-b.p);
 }
 function avCard(A){
@@ -318,12 +330,37 @@ function delRec(i){S.rec=S.rec.filter(r=>r.id!==i);S.bills=S.bills.filter(b=>!(b
 function addBill(){const v=parseFloat(bv.value);if(!bn.value.trim()||!(v>0)||!bd.value)return;S.bills.push({id:uid(),name:bn.value.trim(),value:v,due:bd.value,paid:false});nbOpen=false;save()}
 function payBill(i){const b=S.bills.find(x=>x.id===i);b.paid=true;S.tx.push({id:uid(),type:'gasto',value:b.value,date:iso(today()),cat:'Contas',desc:b.name});save()}
 function delBill(i){S.bills=S.bills.filter(b=>b.id!==i);save()}
+let gOpen={};
+function goalCard(g){
+  const id=g.id,b=gBal(g),pct=Math.min(100,b/g.target*100),eta=gEta(g),need=pmt(g),done=eta&&eta.done;
+  const l1=done?'🎉 Meta alcançada!':eta?`No ritmo de ${brl(g.plan)}/mês: <b>${mon(eta.d)}</b>`:'Defina quanto vai guardar por mês para ver a previsão.';
+  const l2=g.date&&!done?`Para chegar até ${parse(g.date).toLocaleDateString('pt-BR')}: ${brl(need)}/mês${g.plan>0?(g.plan>=need?' ✅':' ⚠️'):''}`:'';
+  const dep=[...(g.deps||[])].sort((a,b)=>b.date.localeCompare(a.date));
+  const det=(k,title,body)=>`<details ${gOpen[k+id]?'open':''} ontoggle="gOpen['${k+id}']=this.open" style="margin-top:8px"><summary style="cursor:pointer;font-weight:600">${title}</summary>${body}</details>`;
+  const val=x=>x==null?'':x;
+  return `<div class="card"><div class="row" style="border:0;padding:0"><h2>${E(g.name)}</h2><button class="s" onclick="delGoal('${id}')">✕</button></div>
+  <div class="row" style="border:0;padding:0"><b>${brl(b)}</b><span class="mut">de ${brl(g.target)} · ${Math.round(pct)}%</span></div><div class="bar"><i style="width:${pct}%"></i></div>
+  <div style="margin-top:8px">${l1}</div>${l2?`<div class="mut">${l2}</div>`:''}
+  ${det('d','＋ Guardei',`<div class="f" style="margin-top:8px"><div class="f2"><input id="dv_${id}" type="number" inputmode="decimal" step="0.01" placeholder="Valor (R$)" value="${g.plan>0?g.plan:''}"><input id="dd_${id}" type="date" value="${iso(today())}"></div><button onclick="addDep('${id}')">Registrar</button></div>`)}
+  ${det('h',`Histórico (${dep.length})`,dep.length?dep.map(d=>`<div class="row"><div>${parse(d.date).toLocaleDateString('pt-BR')}</div><div><b class="grn">+${brl(d.value)}</b> <button class="s" onclick="delDep('${id}','${d.id}')">✕</button></div></div>`).join(''):'<div class="mut" style="margin-top:6px">Nenhum aporte ainda.</div>')}
+  ${det('a','Ajustar meta',`<div class="f" style="margin-top:8px"><div class="f2"><input id="ga_${id}" type="number" inputmode="decimal" placeholder="Valor alvo" value="${val(g.target)}"><input id="gb_${id}" type="date" value="${g.date||''}"></div><div class="f2"><input id="gc_${id}" type="number" inputmode="decimal" placeholder="Guardar por mês" value="${g.plan>0?g.plan:''}"><input id="gy_${id}" type="number" step="0.01" placeholder="Rendimento % ao ano" value="${g.rateA>0?g.rateA:''}"></div><button onclick="saveGoal('${id}')">Salvar</button></div>`)}</div>`;
+}
 function metas(){
-  let h=`<h1>Metas</h1><details id="gf" class="card" ${gfOpen?'open':''} ontoggle="gfOpen=this.open"><summary>＋ Nova meta</summary><div class="f" style="margin-top:10px"><input id="gn" placeholder="Meta (ex.: Viagem)"><div class="f2"><input id="gt" type="number" inputmode="decimal" placeholder="Valor alvo (R$)"><input id="gd" type="date"></div><div class="f2"><input id="gs" type="number" inputmode="decimal" placeholder="Já tenho (R$)"><input id="gr" type="number" step="0.01" placeholder="Rendimento % ao mês"></div><button onclick="addGoal()">Criar meta</button></div></details>`;
-  h+=S.goals.length?S.goals.map(g=>`<div class="card"><div class="row" style="border:0;padding:0"><h2>${E(g.name)}</h2><button class="s" onclick="delGoal('${g.id}')">✕</button></div><div class="mut">${brl(g.target)} até ${parse(g.date).toLocaleDateString('pt-BR')}</div><div style="margin-top:6px">Invista por mês: <b>${brl(pmt(g))}</b></div></div>`).join(''):'<div class="mut">Nenhuma meta ainda.</div>';
+  let h=`<h1>Metas</h1><details id="gf" class="card" ${gfOpen?'open':''} ontoggle="gfOpen=this.open"><summary>＋ Nova meta</summary><div class="f" style="margin-top:10px"><input id="gn" placeholder="Nome (ex.: Viagem Chile, Carro)"><div class="f2"><input id="gt" type="number" inputmode="decimal" placeholder="Valor alvo (R$)"><input id="gp" type="number" inputmode="decimal" placeholder="Guardar por mês (R$)"></div><div class="f2"><input id="gs" type="number" inputmode="decimal" placeholder="Já tenho (R$)"><input id="gr" type="number" step="0.01" placeholder="Rendimento % ao ano"></div><div class="k">Data limite (opcional)</div><input id="gd" type="date"><div class="mut">Rendimento: informe a taxa anual (ex.: o CDI atual). Deixe vazio se não quiser contar rendimento.</div><button onclick="addGoal()">Criar meta</button></div></details>`;
+  h+=S.goals.length?S.goals.map(goalCard).join(''):'<div class="mut">Nenhuma meta ainda. Crie a primeira acima.</div>';
   return h;
 }
-function addGoal(){const t=parseFloat(gt.value);if(!gn.value.trim()||!(t>0)||!gd.value)return;S.goals.push({id:uid(),name:gn.value.trim(),target:t,date:gd.value,saved:parseFloat(gs.value)||0,rate:parseFloat(gr.value)||0});gfOpen=false;save()}
+function addGoal(){const t=parseFloat(gt.value);if(!gn.value.trim()||!(t>0))return;
+  S.goals.push({id:uid(),name:gn.value.trim(),target:t,date:gd.value||'',plan:parseFloat(gp.value)||0,saved:parseFloat(gs.value)||0,rateA:parseFloat(gr.value)||0,deps:[]});gfOpen=false;save()}
+function addDep(id){const g=S.goals.find(x=>x.id===id),v=parseFloat(document.getElementById('dv_'+id).value),d=document.getElementById('dd_'+id).value||iso(today());
+  if(!g||!(v>0))return;const did=uid(),tid=uid();
+  g.deps=g.deps||[];g.deps.push({id:did,date:d,value:v,tx:tid});
+  S.tx.push({id:tid,type:'investimento',value:v,date:d,cat:'Metas',desc:'Meta: '+g.name});
+  gOpen['d'+id]=false;save()}
+function delDep(gid,did){const g=S.goals.find(x=>x.id===gid);if(!g)return;const d=(g.deps||[]).find(x=>x.id===did);
+  g.deps=(g.deps||[]).filter(x=>x.id!==did);if(d&&d.tx)S.tx=S.tx.filter(t=>t.id!==d.tx);save()}
+function saveGoal(id){const g=S.goals.find(x=>x.id===id),gv=k=>document.getElementById(k+'_'+id).value,t=parseFloat(gv('ga'));if(!g||!(t>0))return;
+  g.target=t;g.date=gv('gb')||'';g.plan=parseFloat(gv('gc'))||0;g.rateA=parseFloat(gv('gy'))||0;gOpen['a'+id]=false;save()}
 function delGoal(i){S.goals=S.goals.filter(g=>g.id!==i);save()}
 function render(){
   const g=id=>document.getElementById(id),tl=g('tools'),br=g('brand'),fb=g('fab'),dotEl=g('dot');
