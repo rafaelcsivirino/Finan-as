@@ -42,6 +42,8 @@ nav button.on{color:var(--pri)}
 @media(min-width:680px){.brand{max-width:612px;margin:14px auto 0}}
 .tools{align-self:flex-end;display:flex;gap:6px;position:relative;padding:2px 2px 4px}.tools>button{width:32px;height:32px;padding:0;font-size:16px;border-radius:50%;background:rgba(255,255,255,.14);border:0;color:#fff}
 .menu{position:absolute;top:38px;right:0;background:var(--card);border:1px solid var(--bd);border-radius:10px;padding:6px;display:grid;gap:4px;min-width:170px;z-index:5}.menu[hidden]{display:none}.menu button{width:auto;background:transparent;color:var(--tx);font-size:14px;padding:8px 10px;text-align:left;font-weight:500}
+.sec{padding:12px 0 4px;margin-top:10px;border-top:1px solid var(--bd)}
+details.card>summary{list-style:none}details.card>summary::-webkit-details-marker{display:none}details.card>summary::after{content:'▾';float:right;color:var(--mut)}details.card[open]>summary::after{content:'▴'}
 </style>
 </head>
 <body>
@@ -64,7 +66,7 @@ let S={tx:[],bills:[],goals:[],cfg:{payday:7}},tab='resumo',ref=null,loaded=fals
 let KEY='financas-v1';
 let vm=iso(today()).slice(0,7),ed=null,PR=[],cur=null,gate=null,hiddenAt=0;
 function savePR(){try{localStorage.setItem('rcs-profiles',JSON.stringify(PR))}catch(e){}}
-let sb=null,user=null,syncMsg='',syncing=false,again=false,pt=null;
+let sessChk=false,sb=null,user=null,syncMsg='',syncing=false,again=false,pt=null;
 try{const c=window.RCS_CFG||{};if(c.url&&c.key&&window.supabase)sb=window.supabase.createClient(c.url,c.key)}catch(e){}
 const persist=()=>{try{localStorage.setItem(KEY,JSON.stringify(S))}catch(e){}};
 const busy=()=>{const t=document.activeElement&&document.activeElement.tagName;return t==='INPUT'||t==='SELECT'};
@@ -77,7 +79,7 @@ async function syncNow(manual){
   if(syncing){again=true;return}
   syncing=true;
   try{
-    await ensureUser();
+    await ensureUser();sessChk=true;
     if(!user||(cur.email&&user.email!==cur.email)){syncMsg='Entre na conta para sincronizar.';return}
     const r=await getRemote(),t=S.ts||0;
     if(!r||t>r.ts)await push();
@@ -125,8 +127,8 @@ function ntfyCopy(){try{navigator.clipboard.writeText(S.cfg.ntfy);alert('Tópico
 async function ntfyTest(){try{const r=await fetch('https://ntfy.sh/'+S.cfg.ntfy,{method:'POST',body:'✅ Teste do RCS Finance: as notificações estão funcionando!'});alert(r.ok?'Teste enviado. Veja se chegou no app ntfy.':'Não foi possível enviar o teste.')}catch(e){alert('Sem conexão para enviar o teste.')}}
 function ntfyCard(){
   const t=S.cfg&&S.cfg.ntfy;
-  if(!t)return `<div class="card"><h2>Notificações</h2><div class="mut" style="margin-bottom:8px">Receba avisos no celular, mesmo com o app fechado: dia de investir e boletos (hoje, amanhã e atrasados).</div><button onclick="ntfyOn()">Ativar notificações</button></div>`;
-  return `<div class="card"><h2>Notificações</h2><div class="mut">1) Instale o app <b>ntfy</b> (Play Store ou App Store).<br>2) Abra, toque em <b>+</b> e digite este tópico:</div><div style="margin:8px 0;padding:10px;border-radius:8px;border:1px dashed var(--bd);word-break:break-all;user-select:all"><b>${E(t)}</b></div><div class="mut" style="margin-bottom:8px">Trate o tópico como uma senha: não compartilhe. O aviso sai todo dia às 8h${cur&&cur.acct?'':' — <b>só funciona com a sincronização ligada</b> (crie a conta no card abaixo)'}.</div><div class="f2"><button onclick="ntfyTest()">Enviar teste</button><button class="s" style="width:100%" onclick="ntfyCopy()">Copiar tópico</button></div><button class="s" style="width:100%;margin-top:8px" onclick="ntfyOff()">Desativar</button></div>`;
+  if(!t)return `<div class="sec"><h2>Notificações</h2><div class="mut" style="margin-bottom:8px">Receba avisos no celular, mesmo com o app fechado: dia de investir e boletos (hoje, amanhã e atrasados).</div><button onclick="ntfyOn()">Ativar notificações</button></div>`;
+  return `<div class="sec"><h2>Notificações</h2><div class="mut">1) Instale o app <b>ntfy</b> (Play Store ou App Store).<br>2) Abra, toque em <b>+</b> e digite este tópico:</div><div style="margin:8px 0;padding:10px;border-radius:8px;border:1px dashed var(--bd);word-break:break-all;user-select:all"><b>${E(t)}</b></div><div class="mut" style="margin-bottom:8px">Trate o tópico como uma senha: não compartilhe. O aviso sai todo dia às 8h${cur&&cur.acct?'':' — <b>só funciona com a sincronização ligada</b> (crie a conta no card abaixo)'}.</div><div class="f2"><button onclick="ntfyTest()">Enviar teste</button><button class="s" style="width:100%" onclick="ntfyCopy()">Copiar tópico</button></div><button class="s" style="width:100%;margin-top:8px" onclick="ntfyOff()">Desativar</button></div>`;
 }
 const getCats=()=>(S.cats&&S.cats.length?S.cats:CATS);
 let catOpen=false;
@@ -138,11 +140,26 @@ function catCard(){
   const lim=S.limits||{};
   return `<details class="card" ${catOpen?'open':''} ontoggle="catOpen=this.open"><summary style="cursor:pointer;font-weight:600">Categorias e limites</summary><div class="mut" style="margin:8px 0">Defina um limite mensal (opcional) e adicione ou remova categorias.</div><div class="f">${getCats().map((c,i)=>`<div style="display:grid;grid-template-columns:1fr 110px auto;gap:6px;align-items:center"><span>${E(c)}</span><input id="lm${i}" type="number" inputmode="decimal" placeholder="sem limite" value="${lim[c]||''}"><button class="s" onclick="delCat(${i})">✕</button></div>`).join('')}<button onclick="saveLim()">Salvar limites</button><div class="f2"><input id="nc" placeholder="Nova categoria"><button class="s" style="width:100%" onclick="addCat()">Adicionar</button></div></div></details>`;
 }
+const syncOk=()=>!!(user&&cur&&user.email===cur.email);
+const needLogin=()=>!!(sb&&cur&&cur.acct&&sessChk&&!syncOk());
+let cfgOpen=false;
+function openCfg(){cfgOpen=true;render();const d=document.getElementById('cfg');if(d&&d.scrollIntoView)d.scrollIntoView()}
+function cfgStatus(){
+  const a=[];
+  if(sb){a.push(!(cur&&cur.acct)?'☁️ sincronização desligada':!sessChk?'☁️ verificando…':!syncOk()?'⚠️ entre na conta':syncMsg.startsWith('Sincronizado')?'☁️ '+syncMsg.toLowerCase():syncMsg.startsWith('Sem')?'☁️ sem conexão':'☁️ conectado')}
+  a.push(S.cfg&&S.cfg.ntfy?'🔔 avisos ativos':'🔔 avisos desligados');
+  return a.join(' · ');
+}
+function cfgCard(){
+  const lembrete=`<div class="sec"><h2>Lembrete de investimento</h2><div class="k">Dias do mês para guardar dinheiro (separe por vírgula)</div><div class="f2" style="margin-top:6px"><input id="pd" value="${daysList().join(', ')}"><button onclick="S.cfg.days=pd.value;save()">Salvar</button></div></div>`;
+  const perfil=`<div class="sec"><h2>Perfil: ${E(cur?cur.name:'')}</h2><div class="f"><button class="s" style="width:100%" onclick="lock()">Trocar de perfil</button><button class="s" style="width:100%" onclick="delProfile()">Apagar este perfil</button></div></div>`;
+  return `<details id="cfg" class="card" ${cfgOpen?'open':''} ontoggle="cfgOpen=this.open"><summary style="cursor:pointer"><b>Configurações</b><div class="mut" style="margin-top:2px">${cfgStatus()}</div></summary>${lembrete}${ntfyCard()}${syncCard()}${perfil}</details>`;
+}
 function syncCard(){
-  if(!sb)return `<div class="card"><h2>Sincronização</h2><div class="mut">Ainda não configurada neste site.</div></div>`;
+  if(!sb)return `<div class="sec"><h2>Sincronização</h2><div class="mut">Ainda não configurada neste site.</div></div>`;
   if(cur&&cur.acct){const ok=user&&user.email===cur.email;
-    return `<div class="card"><h2>Sincronização</h2><div class="mut">Conta: ${E(cur.email)}</div><div class="mut">${E(syncMsg)}</div>${ok?`<div class="f2" style="margin-top:8px"><button onclick="syncNow(true)">Sincronizar agora</button><button class="s" style="width:100%" onclick="accOut()">Sair da conta</button></div>`:`<div class="f" style="margin-top:8px"><input id="em" type="email" value="${E(cur.email)}"><input id="pw" type="password" placeholder="Senha"><button onclick="accIn('in')">Entrar</button></div>`}</div>`}
-  return `<div class="card"><h2>Sincronização</h2><div class="mut" style="margin-bottom:8px">Entre ou crie uma conta para ter os mesmos dados no celular e no PC.</div><div class="f"><input id="em" type="email" placeholder="E-mail"><input id="pw" type="password" placeholder="Senha (mín. 6 caracteres)"><div class="f2"><button onclick="accIn('in')">Entrar</button><button class="s" style="width:100%" onclick="accIn('up')">Criar conta</button></div></div></div>`;
+    return `<div class="sec"><h2>Sincronização</h2><div class="mut">Conta: ${E(cur.email)}</div><div class="mut">${E(syncMsg)}</div>${ok?`<div class="f2" style="margin-top:8px"><button onclick="syncNow(true)">Sincronizar agora</button><button class="s" style="width:100%" onclick="accOut()">Sair da conta</button></div>`:`<div class="f" style="margin-top:8px"><input id="em" type="email" value="${E(cur.email)}"><input id="pw" type="password" placeholder="Senha"><button onclick="accIn('in')">Entrar</button></div>`}</div>`}
+  return `<div class="sec"><h2>Sincronização</h2><div class="mut" style="margin-bottom:8px">Entre ou crie uma conta para ter os mesmos dados no celular e no PC.</div><div class="f"><input id="em" type="email" placeholder="E-mail"><input id="pw" type="password" placeholder="Senha (mín. 6 caracteres)"><div class="f2"><button onclick="accIn('in')">Entrar</button><button class="s" style="width:100%" onclick="accIn('up')">Criar conta</button></div></div></div>`;
 }
 function boot(){
   try{PR=JSON.parse(localStorage.getItem('rcs-profiles')||'[]')}catch(e){PR=[]}
@@ -154,7 +171,7 @@ function boot(){
   if(!p){gate={m:'pick'};render();return}
   openProfile(p);
 }
-function openProfile(p){cur=p;KEY=p.key;gate=null;try{localStorage.setItem('rcs-last',p.id)}catch(e){}S=DEF();vm=iso(today()).slice(0,7);tab='resumo';ed=null;loadLocal();syncNow()}
+function openProfile(p){sessChk=false;cur=p;KEY=p.key;gate=null;try{localStorage.setItem('rcs-last',p.id)}catch(e){}S=DEF();vm=iso(today()).slice(0,7);tab='resumo';ed=null;loadLocal();syncNow()}
 const go=m=>{gate={m};render()};
 function pickP(id){openProfile(PR.find(x=>x.id===id))}
 async function newP(){const n=pn.value.trim();if(!n)return;const id='p'+uid(),p={id,name:n,key:'rcs-'+id};PR.push(p);savePR();openProfile(p)}
@@ -236,6 +253,7 @@ function views(){
 function resumo(){
   const v=views(),np=nextPayday(),dp=Math.round((np-today())/864e5);
   let h=`<h1>Resumo</h1><div class="card"><div class="k">Mês exibido</div><input type="month" value="${vm}" onchange="vm=this.value||vm;render()"></div>`;
+  h+=needLogin()?`<div class="alert" onclick="openCfg()" style="cursor:pointer">⚠️ Você saiu da conta: entre novamente para voltar a sincronizar (toque aqui).</div>`:'';
   h+=`<div class="alert">${dp===0?'💰 Hoje é dia '+np.getDate()+': hora de guardar dinheiro para investir!':'📅 Próximo dia de investir ('+np.toLocaleDateString('pt-BR')+'): faltam '+dp+' dia(s).'}</div>`;
   const open=S.bills.filter(b=>!b.paid).sort((a,b)=>a.due.localeCompare(b.due));
   open.filter(b=>dias(b.due)<=3).forEach(b=>{const d=dias(b.due);h+=`<div class="alert">${d<0?'⚠️ Atrasado':'🔔'} ${b.name} (${brl(b.value)}) ${d<0?'venceu há '+(-d)+' dia(s)':d===0?'vence hoje':'vence em '+d+' dia(s)'}</div>`});
@@ -250,10 +268,7 @@ function resumo(){
     return `<div style="margin-bottom:10px"><div class="row" style="border:0;padding:0"><span>${c}</span><b>${brl(x)}${l?' <span class="mut">/ '+brl(l)+'</span>':''}</b></div><div class="bar"><i class="${cl}" style="width:${l?Math.min(100,p):x/mx*100}%"></i></div>${l?`<div class="mut">${Math.round(p)}% do limite</div>`:''}</div>`}).join(''):'<div class="mut">Sem gastos lançados neste mês.</div>';
   h+='</div>';
   h+=catCard();
-  h+=`<div class="card"><h2>Lembrete de investimento</h2><div class="k">Dias do mês para guardar dinheiro (separe por vírgula)</div><div class="f2" style="margin-top:6px"><input id="pd" value="${daysList().join(', ')}"><button onclick="S.cfg.days=pd.value;save()">Salvar</button></div></div>`;
-  h+=ntfyCard();
-  h+=syncCard();
-  h+=`<div class="card"><h2>Perfil: ${E(cur?cur.name:'')}</h2><div class="f"><button class="s" style="width:100%" onclick="lock()">Trocar de perfil</button><button class="s" style="width:100%" onclick="delProfile()">Apagar este perfil</button></div></div>`;
+  h+=cfgCard();
   return h;
 }
 function lancar(){
