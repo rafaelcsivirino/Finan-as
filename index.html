@@ -113,6 +113,15 @@ async function gateIn(kind){
   }catch(e){alert('Não foi possível carregar os dados da conta.')}
 }
 async function accOut(){try{await sb.auth.signOut()}catch(e){}user=null;cur.acct=false;cur.email=null;savePR();syncMsg='';render()}
+function ntfyOn(){S.cfg.ntfy='rcs-'+Array.from(crypto.getRandomValues(new Uint8Array(20)),b=>'abcdefghijklmnopqrstuvwxyz0123456789'[b%36]).join('');save()}
+function ntfyOff(){delete S.cfg.ntfy;save()}
+function ntfyCopy(){try{navigator.clipboard.writeText(S.cfg.ntfy);alert('Tópico copiado.')}catch(e){alert('Copie manualmente o tópico mostrado na tela.')}}
+async function ntfyTest(){try{const r=await fetch('https://ntfy.sh/'+S.cfg.ntfy,{method:'POST',body:'✅ Teste do RCS Finance: as notificações estão funcionando!'});alert(r.ok?'Teste enviado. Veja se chegou no app ntfy.':'Não foi possível enviar o teste.')}catch(e){alert('Sem conexão para enviar o teste.')}}
+function ntfyCard(){
+  const t=S.cfg&&S.cfg.ntfy;
+  if(!t)return `<div class="card"><h2>Notificações</h2><div class="mut" style="margin-bottom:8px">Receba avisos no celular, mesmo com o app fechado: dia de investir e boletos (hoje, amanhã e atrasados).</div><button onclick="ntfyOn()">Ativar notificações</button></div>`;
+  return `<div class="card"><h2>Notificações</h2><div class="mut">1) Instale o app <b>ntfy</b> (Play Store ou App Store).<br>2) Abra, toque em <b>+</b> e digite este tópico:</div><div style="margin:8px 0;padding:10px;border-radius:8px;border:1px dashed var(--bd);word-break:break-all;user-select:all"><b>${E(t)}</b></div><div class="mut" style="margin-bottom:8px">Trate o tópico como uma senha: não compartilhe. O aviso sai todo dia às 8h${cur&&cur.acct?'':' — <b>só funciona com a sincronização ligada</b> (crie a conta no card abaixo)'}.</div><div class="f2"><button onclick="ntfyTest()">Enviar teste</button><button class="s" style="width:100%" onclick="ntfyCopy()">Copiar tópico</button></div><button class="s" style="width:100%;margin-top:8px" onclick="ntfyOff()">Desativar</button></div>`;
+}
 function syncCard(){
   if(!sb)return `<div class="card"><h2>Sincronização</h2><div class="mut">Ainda não configurada neste site.</div></div>`;
   if(cur&&cur.acct){const ok=user&&user.email===cur.email;
@@ -226,6 +235,7 @@ function resumo(){
   h+='</div>';
   h+=`<div class="card"><h2>Limites por categoria (mensal)</h2><div class="f">${CATS.map((c,i)=>`<div class="f2"><span style="align-self:center">${c}</span><input id="lm${i}" type="number" inputmode="decimal" placeholder="sem limite" value="${lim[c]||''}"></div>`).join('')}<button onclick="saveLim()">Salvar limites</button></div></div>`;
   h+=`<div class="card"><h2>Planilha e lembretes</h2><div class="f"><button onclick="exportXlsx()">Baixar planilha do mês</button><button onclick="exportIcs()">Criar lembretes no calendário</button><div class="k">Dias de lembrete para investir (separe por vírgula)</div><div class="f2"><input id="pd" value="${daysList().join(', ')}"><button onclick="S.cfg.days=pd.value;save()">Salvar</button></div></div></div>`;
+  h+=ntfyCard();
   h+=syncCard();
   h+=`<div class="card"><h2>Perfil: ${E(cur?cur.name:'')}</h2><div class="f"><button class="s" style="width:100%" onclick="lock()">Trocar de perfil</button><button class="s" style="width:100%" onclick="delProfile()">Apagar este perfil</button></div></div>`;
   h+=`<div class="card"><h2>Backup</h2><div class="f2"><button onclick="exportar()">Exportar</button><button onclick="imp.click()">Importar</button></div><input id="imp" type="file" accept=".json" hidden onchange="importar(this.files[0])"><div class="mut" style="margin-top:6px">Use para levar seus dados entre celular e computador.</div></div>`;
