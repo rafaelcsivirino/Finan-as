@@ -1,1 +1,1 @@
-window.RCS_CFG={url:'https://gskxszvhisnixheimmyk.supabase.co',key:'sb_publishable_zJIFmDmlD5J1A7-fY0U_OQ_S2s61i5c'};
+window.RCS_CFG={url:'https://gskxszvhisnixheimmyk.supabase.co',key:'sb_publishable_zJIFmDmlD5J1A7-fY0U_OQ_S2s61i5c',vapid:'BEAmooitXSw2HYXbaauJDblHxjlBIKAPiv_7-QlvhgOaafZAbGC1_TYd-tIOqn69IwDg_BRrF6cFx_mnbZAEPHQ'};
