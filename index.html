@@ -193,10 +193,16 @@ async function pushOff(){
 async function pushTest(){
   try{
     const {sub}=await getSub();if(!sub){alert('Ative as notificações primeiro.');return}
-    const j=sub.toJSON();
-    const {data,error}=await sb.functions.invoke('rcs-push',{body:{items:[{sub:{endpoint:j.endpoint,keys:j.keys},title:'RCS Finance',body:'✅ Teste: as notificações estão funcionando!'}]}});
+    const {data:rid,error}=await sb.rpc('rcs_push_test');
     if(error)throw error;
-    if(data&&data.ok>0)toast('Teste enviado. A notificação deve chegar em instantes.');else{const er=data&&data.errors&&data.errors[0];alert('O servidor não conseguiu entregar o teste.'+(er?'\n\nDetalhe: '+(er.status||'')+' '+er.body:'')+'\n\nTente desativar e ativar de novo.')}
+    if(!rid){alert('Nenhum aparelho inscrito. Desative e ative as notificações de novo.');return}
+    toast('Enviando teste…');
+    let r=null;
+    for(let i=0;i<6&&!r;i++){await new Promise(x=>setTimeout(x,1500));const {data}=await sb.rpc('rcs_push_result',{req:rid});if(data)r=data}
+    if(!r){alert('O teste foi enviado, mas o servidor ainda não respondeu. Se a notificação não chegar, me avise.');return}
+    let b=null;try{b=JSON.parse(r.body)}catch(e){}
+    if(r.status===200&&b&&b.ok>0)toast('Teste entregue. A notificação deve chegar em instantes.');
+    else{const er=b&&b.errors&&b.errors[0];alert('O servidor não conseguiu entregar o teste.\n\nStatus: '+r.status+(er?'\nDetalhe: '+(er.status||'')+' '+er.body:(r.body?'\nResposta: '+r.body:'')+(r.error?'\nErro: '+r.error:'')))}
   }catch(e){alert('Falha no teste: '+((e&&e.message)||e))}
 }
 async function localNotify(t,b,tag){try{if(!pushOK()||Notification.permission!=='granted')return;const reg=await navigator.serviceWorker.ready;await reg.showNotification(t,{body:b,icon:'icon-192.png',badge:'icon-192.png',tag})}catch(e){}}
