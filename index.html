@@ -54,6 +54,7 @@ details.card>summary{font-weight:600;cursor:pointer}
 .sheet{position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:20;display:flex;align-items:flex-end;justify-content:center}.sheet[hidden]{display:none}
 .sheetbox{background:var(--card);width:100%;max-width:640px;border-radius:16px 16px 0 0;padding:16px 14px calc(16px + env(safe-area-inset-bottom,0px));max-height:90vh;overflow:auto}
 .toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(78px + env(safe-area-inset-bottom,0px));background:#1f2937;color:#fff;padding:10px 14px;border-radius:10px;font-size:14px;max-width:88%;z-index:30;box-shadow:0 4px 12px rgba(0,0,0,.3)}.toast[hidden]{display:none}
+*{touch-action:manipulation;-webkit-tap-highlight-color:transparent}
 </style>
 </head>
 <body>
@@ -483,6 +484,27 @@ function exportXlsx(){
   XLSX.utils.book_append_sheet(wb,w1,'Resumo');XLSX.utils.book_append_sheet(wb,w2,'Lançamentos');XLSX.utils.book_append_sheet(wb,w3,'Boletos');XLSX.utils.book_append_sheet(wb,w4,'Histórico');
   XLSX.writeFile(wb,'financas-'+mk+'.xlsx');
 }
+const TABS=['resumo','lancar','boletos','metas','graficos'];
+function swipeTarget(t,dx,dy,dt){
+  const i=TABS.indexOf(t);if(i<0)return null;
+  if(Math.abs(dx)<70||Math.abs(dx)<Math.abs(dy)*1.6||dt>600)return null;
+  const n=dx<0?i+1:i-1;return n>=0&&n<TABS.length?TABS[n]:null;
+}
+(function(){
+  let sx=0,sy=0,st=0,ok=false;
+  document.addEventListener('touchstart',e=>{
+    const t=e.touches[0],el=e.target;sx=t.clientX;sy=t.clientY;st=Date.now();
+    ok=e.touches.length===1&&!gate&&TABS.includes(tab)&&document.getElementById('sheet').hidden&&sx>24&&sx<innerWidth-24&&!(el.closest&&el.closest('input,select,textarea'));
+  },{passive:true});
+  document.addEventListener('touchend',e=>{
+    if(!ok)return;ok=false;
+    const t=e.changedTouches[0],dx=t.clientX-sx,n=swipeTarget(tab,dx,t.clientY-sy,Date.now()-st);
+    if(!n)return;
+    go2(n);
+    const a=document.getElementById('app');
+    if(a&&a.animate)a.animate([{opacity:.3,transform:'translateX('+(dx<0?28:-28)+'px)'},{opacity:1,transform:'none'}],{duration:180,easing:'ease-out'});
+  },{passive:true});
+})();
 if('serviceWorker' in navigator)navigator.serviceWorker.register('sw.js').catch(()=>{});
 init();
 </script>
