@@ -55,6 +55,7 @@ details.card>summary{font-weight:600;cursor:pointer}
 .sheetbox{background:var(--card);width:100%;max-width:640px;border-radius:16px 16px 0 0;padding:16px 14px calc(16px + env(safe-area-inset-bottom,0px));max-height:90vh;overflow:auto}
 .toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(78px + env(safe-area-inset-bottom,0px));background:#1f2937;color:#fff;padding:10px 14px;border-radius:10px;font-size:14px;max-width:88%;z-index:30;box-shadow:0 4px 12px rgba(0,0,0,.3)}.toast[hidden]{display:none}
 *{touch-action:manipulation;-webkit-tap-highlight-color:transparent}
+.toast button{width:auto;display:inline-block;margin-left:10px;padding:4px 12px;background:#2dd4bf;color:#0c0d12;border-radius:8px;font-weight:700;font-size:14px}
 </style>
 </head>
 <body>
@@ -207,7 +208,16 @@ async function pushTest(){
   }catch(e){alert('Falha no teste: '+((e&&e.message)||e))}
 }
 async function localNotify(t,b,tag){try{if(!pushOK()||Notification.permission!=='granted')return;const reg=await navigator.serviceWorker.ready;await reg.showNotification(t,{body:b,icon:'icon-192.png',badge:'icon-192.png',tag})}catch(e){}}
-function toast(m){const t=document.getElementById('toast');t.textContent=m;t.hidden=false;clearTimeout(toast.h);toast.h=setTimeout(()=>{t.hidden=true},5000)}
+let undoSnap=null;
+function toast(m,ms){const t=document.getElementById('toast');t.textContent=m;t.hidden=false;clearTimeout(toast.h);toast.h=setTimeout(()=>{t.hidden=true},ms||5000)}
+const snapNow=()=>JSON.stringify({tx:S.tx,bills:S.bills,goals:S.goals,rec:S.rec,recGen:S.recGen,recInc:S.recInc,recIncGen:S.recIncGen,cats:S.cats,limits:S.limits});
+function toastUndo(m){const t=document.getElementById('toast');t.innerHTML=m+' <button onclick="undoDel()">Desfazer</button>';t.hidden=false;clearTimeout(toast.h);toast.h=setTimeout(()=>{t.hidden=true;undoSnap=null},7000)}
+function withUndo(msg,fn){const sn=snapNow();fn();undoSnap=sn;toastUndo(msg)}
+function undoDel(){
+  const t=document.getElementById('toast');
+  if(!undoSnap){toast('Não dá mais para desfazer.');return}
+  const o=JSON.parse(undoSnap);undoSnap=null;Object.assign(S,o);save();toast('Desfeito.');
+}
 function limitCheck(o){
   if(o.type!=='gasto')return;const l=(S.limits||{})[o.cat];if(!(l>0))return;
   const mk=monthKey(o.date),spent=S.tx.filter(t=>t.type==='gasto'&&t.cat===o.cat&&monthKey(t.date)===mk).reduce((a,t)=>a+t.value,0),p=spent/l*100,lv=p>=100?100:p>=80?80:0;
@@ -239,8 +249,14 @@ function catCard(){
 const syncOk=()=>!!(user&&cur&&user.email===cur.email);
 const needLogin=()=>!!(sb&&cur&&cur.acct&&sessChk&&!syncOk());
 function openCfg(){tab='config';render();scrollTo(0,0)}
+const needWelcome=()=>!(S.cfg&&S.cfg.welcomed)&&!S.tx.length&&!S.bills.length&&!S.goals.length;
+function showWelcome(){
+  S.cfg=S.cfg||{};S.cfg.welcomed=true;persist();
+  document.getElementById('sheetbody').innerHTML=`<h2>👋 Bem-vindo ao RCS Finance</h2><div class="f" style="line-height:1.5"><div>➕ Toque no <b>＋</b> para lançar um gasto, uma receita ou um investimento.</div><div>🏠 <b>Resumo</b>: o mês, seus avisos e onde você mais gasta.</div><div>🧾 <b>Boletos</b>: cadastre as contas e marque como pagas. Contas fixas se repetem sozinhas.</div><div>🎯 <b>Metas</b>: guarde para um objetivo e veja quando você chega lá.</div><div>👆 Arraste a tela para o lado para trocar de aba.</div><div>⚙️ Em Configurações, ative a <b>sincronização</b> (mesmos dados no celular e no PC) e as <b>notificações</b>. No iPhone, abra o app pelo ícone da tela inicial.</div><button onclick="closeSheet()">Começar</button></div>`;
+  document.getElementById('sheet').hidden=false;
+}
 function configTab(){
-  const perfil=`<div class="sec"><h2>Perfil: ${E(cur?cur.name:'')}</h2><div class="f"><button class="s" style="width:100%" onclick="lock()">Trocar de perfil</button><button class="s" style="width:100%" onclick="delProfile()">Apagar este perfil</button></div></div>`;
+  const perfil=`<div class="sec"><h2>Perfil: ${E(cur?cur.name:'')}</h2><div class="f"><button class="s" style="width:100%" onclick="showWelcome()">Como usar o app</button><button class="s" style="width:100%" onclick="lock()">Trocar de perfil</button><button class="s" style="width:100%" onclick="delProfile()">Apagar este perfil</button></div></div>`;
   return `<h1>Configurações</h1>${catCard()}<div class="card">${pushCard()}</div><div class="card">${syncCard()}</div><div class="card">${perfil}</div>`;
 }
 function syncCard(){
@@ -260,7 +276,7 @@ function boot(){
   if(!p){gate={m:'pick'};render();return}
   openProfile(p);
 }
-function openProfile(p){sessChk=false;cur=p;KEY=p.key;gate=null;try{localStorage.setItem('rcs-last',p.id)}catch(e){}S=DEF();vm=iso(today()).slice(0,7);tab='resumo';ed=null;loadLocal();syncNow()}
+function openProfile(p){sessChk=false;cur=p;KEY=p.key;gate=null;try{localStorage.setItem('rcs-last',p.id)}catch(e){}S=DEF();vm=iso(today()).slice(0,7);tab='resumo';ed=null;loadLocal();syncNow();if(needWelcome())showWelcome()}
 const go=m=>{gate={m};render()};
 function pickP(id){openProfile(PR.find(x=>x.id===id))}
 async function newP(){const n=pn.value.trim();if(!n)return;const id='p'+uid(),p={id,name:n,key:'rcs-'+id};PR.push(p);savePR();openProfile(p)}
@@ -301,6 +317,18 @@ function genRec(){
       const due=mk+'-'+String(r.day).padStart(2,'0');
       if(due<(r.created||'0000'))return;
       S.bills.push({id:uid(),name:r.name,value:r.value,due,paid:false,rec:r.id})})});
+  if(genInc())ch=true;
+  return ch;
+}
+function genInc(){
+  let ch=false;const t=today(),td=iso(t);S.recIncGen=S.recIncGen||{};
+  [-1,0].forEach(k=>{const mk=iso(new Date(t.getFullYear(),t.getMonth()+k,1)).slice(0,7);
+    (S.recInc||[]).forEach(r=>{const key=r.id+':'+mk;if(S.recIncGen[key])return;
+      const date=mk+'-'+String(r.day).padStart(2,'0');
+      if(date>td)return;
+      S.recIncGen[key]=1;ch=true;
+      if(date<(r.created||'0000'))return;
+      S.tx.push({id:uid(),type:'receita',value:r.value,date,cat:'Receitas',desc:r.name,fixed:r.id})})});
   return ch;
 }
 const catSpend=v=>{const by={};v.m.filter(t=>t.type==='gasto').forEach(t=>by[t.cat]=(by[t.cat]||0)+t.value);return by};
@@ -313,7 +341,7 @@ function loadLocal(){
   render();
 }
 function save(){
-  S.ts=Date.now();render();persist();schedPush();
+  undoSnap=null;S.ts=Date.now();render();persist();schedPush();
 }
 const monthKey=s=>s.slice(0,7);
 const readDays=(a,b)=>[...new Set([a,b].map(x=>parseInt(x)).filter(n=>n>=1&&n<=28))].sort((x,y)=>x-y);
@@ -376,13 +404,36 @@ function resumo(){
   else{h+=cats.slice(0,3).map(row).join('');if(cats.length>3)h+=`<details id="cs" ${csOpen?'open':''} ontoggle="csOpen=this.open"><summary class="mut" style="cursor:pointer;margin-bottom:8px">ver todas (+${cats.length-3})</summary>${cats.slice(3).map(row).join('')}</details>`}
   return h+'</div>';
 }
-function lancar(){
-  const all=[...S.tx].sort((a,b)=>b.date.localeCompare(a.date)),l=all.slice(0,txN);
-  let h='<h1>Extrato</h1><div class="card">';
-  h+=l.length?l.map(t=>`<div class="row"><div><div>${E(t.desc||t.cat)}</div><div class="mut">${parse(t.date).toLocaleDateString('pt-BR')} · ${t.type==='gasto'?E(t.cat):t.type}</div></div><div style="text-align:right"><b class="${t.type==='gasto'?'red':'grn'}">${t.type==='gasto'?'−':'+'}${brl(t.value)}</b><br><button class="s" onclick="editTx('${t.id}')">✎</button> <button class="s" onclick="delTx('${t.id}')">✕</button></div></div>`).join(''):'<div class="mut">Nada lançado ainda. Toque no ＋ para começar.</div>';
+let fx={q:'',cat:'',type:'',mon:''},rifOpen=false;
+const norm=x=>String(x||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'');
+const txRow=t=>`<div class="row"><div><div>${E(t.desc||t.cat)}</div><div class="mut">${parse(t.date).toLocaleDateString('pt-BR')} · ${t.type==='gasto'?E(t.cat):t.type}</div></div><div style="text-align:right"><b class="${t.type==='gasto'?'red':'grn'}">${t.type==='gasto'?'−':'+'}${brl(t.value)}</b><br><button class="s" onclick="editTx('${t.id}')">✎</button> <button class="s" onclick="delTx('${t.id}')">✕</button></div></div>`;
+function fxList(){
+  const q=norm(fx.q);
+  const all=S.tx.filter(t=>(!fx.type||t.type===fx.type)&&(!fx.cat||t.cat===fx.cat)&&(!fx.mon||monthKey(t.date)===fx.mon)&&(!q||norm(t.desc).includes(q)||norm(t.cat).includes(q))).sort((a,b)=>b.date.localeCompare(a.date));
+  const sum=ty=>all.filter(t=>t.type===ty).reduce((a,t)=>a+t.value,0),l=all.slice(0,txN);
+  let h=`<div class="card"><div class="mut" style="margin-bottom:6px">${all.length} lançamento(s) · <span class="red">gasto ${brl(sum('gasto'))}</span> · <span class="grn">receita ${brl(sum('receita'))}</span> · investido ${brl(sum('investimento'))}</div>`;
+  h+=l.length?l.map(txRow).join(''):'<div class="mut">'+(S.tx.length?'Nada encontrado com esses filtros.':'Nada lançado ainda. Toque no ＋ para começar.')+'</div>';
   h+='</div>';
-  if(all.length>txN)h+=`<button class="s" style="width:100%" onclick="txN+=20;render()">Ver mais (${all.length-txN})</button>`;
+  if(all.length>txN)h+=`<button class="s" style="width:100%" onclick="txN+=20;fxRefresh()">Ver mais (${all.length-txN})</button>`;
   return h;
+}
+const fxRefresh=()=>{const el=document.getElementById('exlist');if(el)el.innerHTML=fxList()};
+const fxSet=(k,v)=>{fx[k]=v;txN=10;fxRefresh()};
+function rifCard(){
+  const L=S.recInc||[];
+  return `<details id="rif" class="card" ${rifOpen?'open':''} ontoggle="rifOpen=this.open"><summary>💵 Receitas fixas (${L.length})</summary><div class="mut" style="margin:8px 0">O lançamento da receita é criado sozinho todo mês, no dia combinado.</div><div class="f"><input id="ri_n" placeholder="Nome (ex.: Salário)"><div class="f2"><input id="ri_v" type="number" inputmode="decimal" step="0.01" placeholder="Valor (R$)"><input id="ri_d" type="number" min="1" max="28" placeholder="Dia do mês"></div><button onclick="addInc()">Cadastrar receita fixa</button></div>${L.map(r=>`<div class="row"><div>💵 ${E(r.name)} · <b>${brl(r.value)}</b><div class="mut">todo dia ${r.day}</div></div><button class="s" onclick="delInc('${r.id}')">✕</button></div>`).join('')}</details>`;
+}
+function addInc(){const g=k=>document.getElementById(k).value,v=parseFloat(g('ri_v')),d=Math.min(28,Math.max(1,parseInt(g('ri_d'))));if(!g('ri_n').trim()||!(v>0)||!d)return;S.recInc=S.recInc||[];S.recInc.push({id:uid(),name:g('ri_n').trim(),value:v,day:d,created:iso(today())});genRec();save()}
+function delInc(i){withUndo('Receita fixa removida',()=>{S.recInc=(S.recInc||[]).filter(r=>r.id!==i);save()})}
+function lancar(){
+  const mons=[...new Set(S.tx.map(t=>monthKey(t.date)))].sort().reverse(),cats=[...new Set([...getCats(),...S.tx.map(t=>t.cat).filter(Boolean)])];
+  const mlab=m=>{const [y,mm]=m.split('-').map(Number);return new Date(y,mm-1,1).toLocaleDateString('pt-BR',{month:'long',year:'numeric'})};
+  const opt=(v,l,sel)=>`<option value="${E(v)}"${sel===v?' selected':''}>${E(l)}</option>`;
+  const active=fx.q||fx.mon||fx.type||fx.cat;
+  let h='<h1>Extrato</h1>';
+  h+=`<details class="card" ${active?'open':''}><summary>🔎 Buscar e filtrar${active?' (ativo)':''}</summary><div class="f" style="margin-top:10px"><input type="search" placeholder="Buscar (ex.: mercado)" value="${E(fx.q)}" oninput="fxSet('q',this.value)"><div class="f2"><select onchange="fxSet('mon',this.value)">${opt('','Todos os meses',fx.mon)}${mons.map(m=>opt(m,mlab(m),fx.mon)).join('')}</select><select onchange="fxSet('type',this.value)">${opt('','Todos os tipos',fx.type)}${opt('gasto','Gastos',fx.type)}${opt('receita','Receitas',fx.type)}${opt('investimento','Investimentos',fx.type)}</select></div><select onchange="fxSet('cat',this.value)">${opt('','Todas as categorias',fx.cat)}${cats.map(c=>opt(c,c,fx.cat)).join('')}</select><button class="s" style="width:100%" onclick="fx={q:'',cat:'',type:'',mon:''};render()">Limpar filtros</button></div></details>`;
+  h+=`<div id="exlist">${fxList()}</div>`;
+  return h+rifCard();
 }
 function openSheet(id){
   ed=id||null;const e=ed?S.tx.find(t=>t.id===ed):null,sel=(v,x)=>v===x?' selected':'';
@@ -395,7 +446,7 @@ function addTx(){const v=parseFloat(vl.value);if(!(v>0))return;const o={type:ty.
   if(ed){const t=S.tx.find(x=>x.id===ed);if(t)Object.assign(t,o)}else S.tx.push(Object.assign({id:uid()},o));
   limitCheck(o);closeSheet();save()}
 const editTx=i=>openSheet(i),cancelEd=closeSheet;
-function delTx(i){S.tx=S.tx.filter(t=>t.id!==i);save()}
+function delTx(i){withUndo('Lançamento apagado',()=>{S.tx=S.tx.filter(t=>t.id!==i);save()})}
 const billRow=b=>{const d=dias(b.due);return `<div class="row"><div><div>${b.paid?'✅ ':''}${b.rec?'🔁 ':''}${E(b.name)} · <b>${brl(b.value)}</b></div><div class="mut ${!b.paid&&d<0?'red':''}">${parse(b.due).toLocaleDateString('pt-BR')}${b.paid?' · pago':d<0?' · atrasado':d===0?' · hoje':' · em '+d+' dia(s)'}</div></div><div>${b.paid?'':`<button class="s" onclick="payBill('${b.id}')">Paguei</button> `}<button class="s" onclick="delBill('${b.id}')">✕</button></div></div>`};
 function boletos(){
   const open=S.bills.filter(b=>!b.paid).sort((a,b)=>a.due.localeCompare(b.due)),paid=S.bills.filter(b=>b.paid).sort((a,b)=>b.due.localeCompare(a.due));
@@ -407,10 +458,10 @@ function boletos(){
   return h;
 }
 function addRec(){const v=parseFloat(rv.value),d=Math.min(28,Math.max(1,parseInt(rd.value)));if(!rn.value.trim()||!(v>0)||!d)return;S.rec=S.rec||[];S.rec.push({id:uid(),name:rn.value.trim(),value:v,day:d,created:iso(today())});genRec();save()}
-function delRec(i){S.rec=S.rec.filter(r=>r.id!==i);S.bills=S.bills.filter(b=>!(b.rec===i&&!b.paid));save()}
+function delRec(i){withUndo('Conta fixa removida',()=>{S.rec=S.rec.filter(r=>r.id!==i);S.bills=S.bills.filter(b=>!(b.rec===i&&!b.paid));save()})}
 function addBill(){const v=parseFloat(bv.value);if(!bn.value.trim()||!(v>0)||!bd.value)return;S.bills.push({id:uid(),name:bn.value.trim(),value:v,due:bd.value,paid:false});nbOpen=false;save()}
 function payBill(i){const b=S.bills.find(x=>x.id===i);b.paid=true;S.tx.push({id:uid(),type:'gasto',value:b.value,date:iso(today()),cat:'Contas',desc:b.name});save()}
-function delBill(i){S.bills=S.bills.filter(b=>b.id!==i);save()}
+function delBill(i){withUndo('Boleto apagado',()=>{S.bills=S.bills.filter(b=>b.id!==i);save()})}
 let gOpen={};
 function goalCard(g){
   const id=g.id,b=gBal(g),pct=Math.min(100,b/g.target*100),eta=gEta(g),need=pmt(g),done=eta&&eta.done;
@@ -439,10 +490,10 @@ function addDep(id){const g=S.goals.find(x=>x.id===id),v=parseFloat(document.get
   S.tx.push({id:tid,type:'investimento',value:v,date:d,cat:'Metas',desc:'Meta: '+g.name});
   gOpen['d'+id]=false;save()}
 function delDep(gid,did){const g=S.goals.find(x=>x.id===gid);if(!g)return;const d=(g.deps||[]).find(x=>x.id===did);
-  g.deps=(g.deps||[]).filter(x=>x.id!==did);if(d&&d.tx)S.tx=S.tx.filter(t=>t.id!==d.tx);save()}
+  withUndo('Aporte apagado',()=>{g.deps=(g.deps||[]).filter(x=>x.id!==did);if(d&&d.tx)S.tx=S.tx.filter(t=>t.id!==d.tx);save()})}
 function saveGoal(id){const g=S.goals.find(x=>x.id===id),gv=k=>document.getElementById(k+'_'+id).value,t=parseFloat(gv('ga'));if(!g||!(t>0))return;
   g.target=t;g.date=gv('gb')||'';g.plan=parseFloat(gv('gc'))||0;g.rateA=parseFloat(gv('gy'))||0;g.days=readDays(gv('gv1'),gv('gv2'));gOpen['a'+id]=false;save()}
-function delGoal(i){S.goals=S.goals.filter(g=>g.id!==i);save()}
+function delGoal(i){withUndo('Meta apagada',()=>{S.goals=S.goals.filter(g=>g.id!==i);save()})}
 function render(){
   const g=id=>document.getElementById(id),tl=g('tools'),br=g('brand'),fb=g('fab'),dotEl=g('dot');
   if(tl&&tl.style)tl.style.display=gate?'none':'flex';
