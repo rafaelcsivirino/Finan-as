@@ -210,7 +210,7 @@ async function pushTest(){
 async function localNotify(t,b,tag){try{if(!pushOK()||Notification.permission!=='granted')return;const reg=await navigator.serviceWorker.ready;await reg.showNotification(t,{body:b,icon:'icon-192.png',badge:'icon-192.png',tag})}catch(e){}}
 let undoSnap=null;
 function toast(m,ms){const t=document.getElementById('toast');t.textContent=m;t.hidden=false;clearTimeout(toast.h);toast.h=setTimeout(()=>{t.hidden=true},ms||5000)}
-const snapNow=()=>JSON.stringify({tx:S.tx,bills:S.bills,goals:S.goals,rec:S.rec,recGen:S.recGen,recInc:S.recInc,recIncGen:S.recIncGen,cats:S.cats,limits:S.limits});
+const snapNow=()=>JSON.stringify({tx:S.tx,bills:S.bills,goals:S.goals,rec:S.rec,recGen:S.recGen,recInc:S.recInc,recIncGen:S.recIncGen,parc:S.parc,parcGen:S.parcGen,cats:S.cats,limits:S.limits});
 function toastUndo(m){const t=document.getElementById('toast');t.innerHTML=m+' <button onclick="undoDel()">Desfazer</button>';t.hidden=false;clearTimeout(toast.h);toast.h=setTimeout(()=>{t.hidden=true;undoSnap=null},7000)}
 function withUndo(msg,fn){const sn=snapNow();fn();undoSnap=sn;toastUndo(msg)}
 function undoDel(){
@@ -226,13 +226,14 @@ function limitCheck(o){
   const m=lv===100?`🚨 ${o.cat}: você passou do limite (${brl(spent)} de ${brl(l)})`:`⚠️ ${o.cat}: você já usou ${Math.round(p)}% do limite (${brl(spent)} de ${brl(l)})`;
   toast(m);localNotify('RCS Finance',m,'lim-'+o.cat);
 }
+function weeklyToggle(){S.cfg=S.cfg||{};S.cfg.weekly=(S.cfg.weekly===false);save()}
 function pushCard(){
   pushState().then(x=>{if(x!==pushSt){pushSt=x;if(tab==='config'&&!gate)softRender()}});
   let b;
   if(!sb||!vapid())b='<div class="mut">Ainda não configuradas neste site.</div>';
   else if(pushSt==='unsupported')b='<div class="mut">Este navegador não permite avisos. No iPhone, abra o app pelo <b>ícone da tela inicial</b> (instalado pelo Safari) e use o iOS 16.4 ou mais novo.</div>';
   else if(pushSt==='denied')b='<div class="mut">As notificações estão bloqueadas para este app. Libere em Ajustes do celular e volte aqui.</div>';
-  else if(pushSt==='on')b='<div class="mut" style="margin-bottom:8px">✅ Ativadas neste aparelho. Você recebe os avisos de metas e boletos todo dia às 8h, e o aviso de limite na hora em que lança o gasto.</div><div class="f2"><button onclick="pushTest()">Enviar teste</button><button class="s" style="width:100%" onclick="pushOff()">Desativar</button></div>';
+  else if(pushSt==='on')b='<div class="mut" style="margin-bottom:8px">✅ Ativadas neste aparelho. Você recebe os avisos de metas e boletos todo dia às 8h, o resumo da semana às segundas e o aviso de limite na hora em que lança o gasto.</div><button class="s" style="width:100%;margin-bottom:8px" onclick="weeklyToggle()">📊 Resumo semanal: '+(S.cfg&&S.cfg.weekly===false?'desligado':'ligado')+'</button><div class="f2"><button onclick="pushTest()">Enviar teste</button><button class="s" style="width:100%" onclick="pushOff()">Desativar</button></div>';
   else b='<div class="mut" style="margin-bottom:8px">Receba avisos de metas, boletos e limites direto neste celular.</div><button onclick="pushOn()">Ativar notificações</button>';
   return `<div class="sec"><h2>Notificações</h2>${b}</div>`;
 }
@@ -318,6 +319,7 @@ function genRec(){
       if(due<(r.created||'0000'))return;
       S.bills.push({id:uid(),name:r.name,value:r.value,due,paid:false,rec:r.id})})});
   if(genInc())ch=true;
+  if(genParc())ch=true;
   return ch;
 }
 function genInc(){
@@ -394,6 +396,7 @@ function resumo(){
   let h=monthRow();
   h+=`<div class="card grid"><div><div class="k">Recebido</div><div class="v grn">${brl(v.rec)}</div></div><div><div class="k">Gasto</div><div class="v red">${brl(v.gas)}</div></div><div><div class="k">Investido</div><div class="v">${brl(v.inv)}</div></div></div>`;
   h+=avCard(avisos(v));
+  h+=forecast(v);
   const by=catSpend(v),lim=S.limits||{};
   const cats=[...new Set([...Object.keys(by),...Object.keys(lim).filter(c=>lim[c]>0)])].sort((a,b)=>(by[b]||0)-(by[a]||0));
   const mx=Math.max(1,...cats.map(c=>by[c]||0));
@@ -402,6 +405,38 @@ function resumo(){
   h+='<div class="card"><h2>Onde você mais gastou</h2>';
   if(!cats.length)h+='<div class="mut">Sem gastos lançados neste mês.</div>';
   else{h+=cats.slice(0,3).map(row).join('');if(cats.length>3)h+=`<details id="cs" ${csOpen?'open':''} ontoggle="csOpen=this.open"><summary class="mut" style="cursor:pointer;margin-bottom:8px">ver todas (+${cats.length-3})</summary>${cats.slice(3).map(row).join('')}</details>`}
+  return h+'</div>';
+}
+let parcOpen=false;
+const parcDate=(p,k)=>{const [y,m,d]=p.start.split('-').map(Number);return iso(new Date(y,m-1+k,1)).slice(0,7)+'-'+String(Math.min(d,28)).padStart(2,'0')};
+const parcPaid=p=>{let c=0;const td=iso(today());for(let k=0;k<p.n;k++)if(parcDate(p,k)<=td)c++;return c};
+function genParc(){
+  let ch=false;const td=iso(today());S.parcGen=S.parcGen||{};
+  (S.parc||[]).forEach(p=>{for(let k=0;k<p.n;k++){const date=parcDate(p,k);if(date>td)break;const key=p.id+':'+k;if(S.parcGen[key])continue;S.parcGen[key]=1;ch=true;
+    if(date<(p.created||'0000'))continue;
+    S.tx.push({id:uid(),type:'gasto',value:p.value,date,cat:p.cat||'Outros',desc:`${p.name} (${k+1}/${p.n})`,parc:p.id})}});
+  return ch;
+}
+function parcCard(){
+  const L=S.parc||[];
+  const row=p=>{const pg=parcPaid(p),falt=p.n-pg;return `<div class="row"><div style="flex:1"><div>💳 ${E(p.name)} · <b>${brl(p.value)}</b> × ${p.n}</div><div class="mut">${pg}/${p.n} pagas · ${falt>0?'faltam '+falt+' ('+brl(falt*p.value)+')':'quitado ✅'}</div><div class="bar"><i style="width:${pg/p.n*100}%"></i></div></div><button class="s" onclick="delParc('${p.id}')">✕</button></div>`};
+  return `<details id="pcd" class="card" ${parcOpen?'open':''} ontoggle="parcOpen=this.open"><summary>💳 Compras parceladas (${L.length})</summary><div class="mut" style="margin:8px 0">Cada parcela vira um gasto sozinha, no dia certo de cada mês.</div><div class="f"><input id="pc_n" placeholder="O que foi (ex.: TV)"><div class="f2"><input id="pc_v" type="number" inputmode="decimal" step="0.01" placeholder="Valor da parcela"><input id="pc_k" type="number" min="2" max="120" placeholder="Nº de parcelas"></div><div class="k">Data da primeira parcela</div><input id="pc_d" type="date" value="${iso(today())}"><select id="pc_c">${getCats().map(c=>`<option>${E(c)}</option>`).join('')}</select><button onclick="addParc()">Cadastrar compra parcelada</button></div>${L.map(row).join('')}</details>`;
+}
+function addParc(){const g=k=>document.getElementById(k).value,v=parseFloat(g('pc_v')),n=parseInt(g('pc_k'));
+  if(!g('pc_n').trim()||!(v>0)||!(n>=2)||n>120)return;
+  S.parc=S.parc||[];S.parc.push({id:uid(),name:g('pc_n').trim(),value:v,n,start:g('pc_d')||iso(today()),cat:g('pc_c')||'Outros',created:iso(today())});genRec();save()}
+function delParc(i){withUndo('Compra parcelada removida',()=>{S.parc=(S.parc||[]).filter(p=>p.id!==i);save()})}
+function forecast(v){
+  const t=today(),mk=iso(t).slice(0,7);if(vm!==mk)return '';
+  const d=t.getDate(),N=new Date(t.getFullYear(),t.getMonth()+1,0).getDate(),left=N-d+1;
+  if(d<3||!(v.gas>0))return '';
+  const pace=v.gas/d,proj=pace*N,eom=mk+'-'+String(N).padStart(2,'0'),td=iso(t);
+  const bills=S.bills.filter(b=>!b.paid&&b.due.slice(0,7)===mk).reduce((a,b)=>a+b.value,0);
+  let parc=0;(S.parc||[]).forEach(p=>{for(let k=0;k<p.n;k++){const dt=parcDate(p,k);if(dt>td&&dt<=eom)parc+=p.value}});
+  const comp=bills+parc;
+  let h=`<div class="card"><h2>📈 Previsão do mês</h2><div>No ritmo atual (${brl(pace)}/dia), você fecha o mês com <b>${brl(proj)}</b> em gastos.</div>`;
+  if(comp>0)h+=`<div class="mut">Ainda vão sair ${brl(comp)} em boletos e parcelas deste mês.</div>`;
+  if(v.rec>0){const livre=v.rec-v.gas-v.inv-comp;h+=livre>=0?`<div style="margin-top:4px">Dá para gastar <b>${brl(livre/left)}/dia</b> até o fim do mês.</div>`:`<div class="red" style="margin-top:4px">Você já passou ${brl(-livre)} da sua receita do mês.</div>`}
   return h+'</div>';
 }
 let fx={q:'',cat:'',type:'',mon:''},rifOpen=false;
@@ -455,6 +490,7 @@ function boletos(){
   h+=`<div class="card"><h2>Em aberto (${open.length})</h2>${open.length?open.map(billRow).join(''):'<div class="mut">Nenhum boleto em aberto.</div>'}</div>`;
   if(paid.length)h+=`<details id="pd2" class="card" ${pdOpen?'open':''} ontoggle="pdOpen=this.open"><summary>✅ Pagos (${paid.length})</summary>${paid.map(billRow).join('')}</details>`;
   h+=`<details id="rf" class="card" ${rfOpen?'open':''} ontoggle="rfOpen=this.open"><summary>🔁 Contas fixas (${(S.rec||[]).length})</summary><div class="mut" style="margin:8px 0">O boleto é criado sozinho todo mês.</div><div class="f"><input id="rn" placeholder="Nome (ex.: Aluguel)"><div class="f2"><input id="rv" type="number" inputmode="decimal" step="0.01" placeholder="Valor (R$)"><input id="rd" type="number" min="1" max="28" placeholder="Dia do vencimento"></div><button onclick="addRec()">Cadastrar conta fixa</button></div>${(S.rec||[]).map(r=>`<div class="row"><div>🔁 ${E(r.name)} · <b>${brl(r.value)}</b><div class="mut">todo dia ${r.day}</div></div><button class="s" onclick="delRec('${r.id}')">✕</button></div>`).join('')}</details>`;
+  h+=parcCard();
   return h;
 }
 function addRec(){const v=parseFloat(rv.value),d=Math.min(28,Math.max(1,parseInt(rd.value)));if(!rn.value.trim()||!(v>0)||!d)return;S.rec=S.rec||[];S.rec.push({id:uid(),name:rn.value.trim(),value:v,day:d,created:iso(today())});genRec();save()}
