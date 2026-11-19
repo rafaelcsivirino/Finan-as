@@ -90,8 +90,97 @@ const persist=()=>{try{localStorage.setItem(KEY,JSON.stringify(S))}catch(e){}};
 const busy=()=>{const t=document.activeElement&&document.activeElement.tagName;return t==='INPUT'||t==='SELECT'};
 const softRender=()=>{if(!gate&&!busy())render()};
 async function ensureUser(){if(!sb)return null;try{const {data}=await sb.auth.getSession();user=data.session?data.session.user:null}catch(e){}return user}
-async function getRemote(){const {data,error}=await sb.from('finance_data').select('data').eq('user_id',user.id).maybeSingle();if(error)throw error;return data&&data.data&&data.data.ts?data.data:null}
-async function push(){const {error}=await sb.from('finance_data').upsert({user_id:user.id,data:S,updated_at:new Date().toISOString()});if(error)throw error}
+let edits=0,grpChecked=false,grpMembers=null;
+const COLS=['tx','bills','goals','rec','recInc','parc'];
+const stable=v=>JSON.stringify(v,(k,x)=>x&&typeof x==='object'&&!Array.isArray(x)?Object.keys(x).sort().reduce((o,kk)=>(o[kk]=x[kk],o),{}):x);
+const itemKey=(c,x)=>{const y=Object.assign({},x);delete y.u;if(c==='goals')delete y.deps;return stable(y)};
+function baseOf(st){
+  const b={};
+  COLS.forEach(c=>{b[c]={};(st[c]||[]).forEach(x=>{b[c][x.id]=itemKey(c,x)})});
+  b.deps={};(st.goals||[]).forEach(g=>(g.deps||[]).forEach(d=>{b.deps[d.id]=1}));
+  b.sc={};['cats','limits','cfg'].forEach(k=>{b.sc[k]=stable(st[k]===undefined?null:st[k])});
+  return b;
+}
+const loadBase=()=>{try{const r=localStorage.getItem(KEY+':base');return r?JSON.parse(r):null}catch(e){return null}};
+const saveBase=b=>{try{localStorage.setItem(KEY+':base',JSON.stringify(b))}catch(e){}};
+const who=()=>(cur&&(cur.gname||cur.name))||'';
+// marca com a hora cada item que mudou e registra o que foi apagado
+function stampLocal(){
+  const base=loadBase(),now=Date.now();
+  if(!base){saveBase(baseOf(S));return}
+  S.del=S.del||[];S.mu=S.mu||{};
+  const hasDel=(c,id)=>S.del.some(d=>d.c===c&&d.id===id);
+  COLS.forEach(c=>{
+    const ids=new Set();
+    (S[c]||[]).forEach(x=>{ids.add(x.id);if((base[c]||{})[x.id]!==itemKey(c,x)){x.u=now;S.del=S.del.filter(d=>!(d.c===c&&d.id===x.id))}});
+    Object.keys(base[c]||{}).forEach(id=>{if(!ids.has(id)&&!hasDel(c,id))S.del.push({c,id,u:now})});
+  });
+  const ds=new Set();
+  (S.goals||[]).forEach(g=>(g.deps||[]).forEach(d=>{ds.add(d.id);if(!(d.id in (base.deps||{}))){d.u=now;S.del=S.del.filter(t=>!(t.c==='dep'&&t.id===d.id))}}));
+  Object.keys(base.deps||{}).forEach(id=>{if(!ds.has(id)&&!hasDel('dep',id))S.del.push({c:'dep',id,u:now})});
+  ['cats','limits','cfg'].forEach(k=>{if((base.sc||{})[k]!==stable(S[k]===undefined?null:S[k]))S.mu[k]=now});
+  saveBase(baseOf(S));
+}
+function mergeGoal(w,o,dm){
+  const g=Object.assign({},w),m=new Map();
+  [...(o.deps||[]),...(w.deps||[])].forEach(d=>{const p=m.get(d.id);if(!p||(d.u||0)>(p.u||0))m.set(d.id,d)});
+  g.deps=[...m.values()].filter(d=>{const t=dm.get('dep:'+d.id);return !(t&&t.u>(d.u||0))});
+  return g;
+}
+// L = dados deste aparelho, R = dados do servidor. Junta item por item; vale o mais recente.
+function mergeStates(L,R){
+  L=L||{};R=R||{};
+  const M=Object.assign({},R,L),dm=new Map();
+  [...(R.del||[]),...(L.del||[])].forEach(d=>{const k=d.c+':'+d.id,o=dm.get(k);if(!o||d.u>o.u)dm.set(k,d)});
+  COLS.forEach(c=>{
+    const a=new Map((L[c]||[]).map(x=>[x.id,x])),b=new Map((R[c]||[]).map(x=>[x.id,x])),out=[];
+    [...b.keys(),...[...a.keys()].filter(id=>!b.has(id))].forEach(id=>{
+      const x=a.get(id),y=b.get(id);let w;
+      if(x&&y)w=(x.u||0)>(y.u||0)?x:y;else w=x||y;
+      if(c==='goals')w=mergeGoal(w,(w===x?y:x)||{deps:[]},dm);
+      const t=dm.get(c+':'+id);if(t&&t.u>(w.u||0))return;
+      out.push(w);
+    });
+    M[c]=out;
+  });
+  M.mu={};
+  ['cats','limits','cfg'].forEach(k=>{
+    const lu=(L.mu||{})[k]||0,ru=(R.mu||{})[k]||0,w=lu>ru?L:R;
+    if(w[k]!==undefined)M[k]=w[k];else if(L[k]!==undefined)M[k]=L[k];else if(R[k]!==undefined)M[k]=R[k];
+    if(lu||ru)M.mu[k]=Math.max(lu,ru);
+  });
+  ['recGen','recIncGen','parcGen'].forEach(k=>{if(L[k]||R[k])M[k]=Object.assign({},R[k]||{},L[k]||{})});
+  if(L.limN||R.limN){const o=Object.assign({},R.limN||{});Object.entries(L.limN||{}).forEach(([k,v])=>{o[k]=Math.max(o[k]||0,v)});M.limN=o}
+  const cutoff=Date.now()-90*864e5;
+  M.del=[...dm.values()].filter(d=>d.u>cutoff);
+  M.ts=Math.max(L.ts||0,R.ts||0);
+  return M;
+}
+const gtarget=()=>cur&&cur.grp?{t:'group_data',k:'group_id',v:cur.grp}:{t:'finance_data',k:'user_id',v:user&&user.id};
+async function getRemote(){
+  const g=gtarget();
+  const {data,error}=await sb.from(g.t).select('data,rev').eq(g.k,g.v).maybeSingle();
+  if(error)throw error;
+  return data?{data:data.data||{},rev:data.rev||0}:null;
+}
+async function writeRemote(M,rem){
+  const g=gtarget(),now=new Date().toISOString();
+  if(!rem){const {error}=await sb.from(g.t).insert({[g.k]:g.v,data:M,rev:1,updated_at:now});if(error){if(error.code==='23505')return false;throw error}return true}
+  const {data,error}=await sb.from(g.t).update({data:M,rev:rem.rev+1,updated_at:now}).eq(g.k,g.v).eq('rev',rem.rev).select('rev');
+  if(error)throw error;
+  return !!(data&&data.length);
+}
+async function refreshGroup(){
+  try{
+    const {data:m,error}=await sb.from('group_members').select('group_id,name').eq('user_id',user.id).maybeSingle();
+    if(error)throw error;
+    if(m){
+      const {data:g}=await sb.from('groups').select('name,code').eq('id',m.group_id).maybeSingle();
+      cur.grp=m.group_id;cur.gname=m.name||cur.gname||'';cur.grpName=g?g.name:(cur.grpName||'');cur.code=g?g.code:(cur.code||'');
+    }else{delete cur.grp;delete cur.grpName;delete cur.code}
+    savePR();
+  }catch(e){}
+}
 async function syncNow(manual){
   if(!sb||!cur||!cur.acct)return;
   if(syncing){again=true;return}
@@ -99,9 +188,19 @@ async function syncNow(manual){
   try{
     await ensureUser();sessChk=true;
     if(!user||(cur.email&&user.email!==cur.email)){syncMsg='Entre na conta para sincronizar.';return}
-    const r=await getRemote(),t=S.ts||0;
-    if(!r||t>r.ts)await push();
-    else if(t<r.ts){S=Object.assign(DEF(),r);persist()}
+    if(!grpChecked){await refreshGroup();grpChecked=true}
+    let done=false;
+    for(let i=0;i<4&&!done;i++){
+      stampLocal();const e0=edits;
+      const rem=await getRemote(),M=mergeStates(S,rem?rem.data:{});
+      let ok=true;
+      if(!rem||stable(M)!==stable(rem.data))ok=await writeRemote(M,rem);
+      if(!ok)continue;
+      S=mergeStates(S,M);saveBase(baseOf(M));persist();
+      if(edits!==e0)again=true;
+      done=true;
+    }
+    if(!done)throw new Error('conflito');
     syncMsg='Sincronizado às '+new Date().toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'});
   }catch(e){syncMsg='Sem conexão ou erro ao sincronizar. Seus dados continuam salvos neste aparelho.'}
   finally{syncing=false;if(again){again=false;syncNow()}else softRender()}
@@ -121,18 +220,23 @@ async function doAuth(kind){
 async function accIn(kind){
   if(!await doAuth(kind))return;
   try{
-    const r=await getRemote(),has=S.tx.length||S.bills.length||S.goals.length||(S.rec||[]).length;
     cur.acct=true;cur.email=user.email;savePR();
-    if(r&&has){if(confirm('Esta conta já tem dados na nuvem.\n\nOK = usar os dados da nuvem (substitui os deste perfil)\nCancelar = enviar os dados deste perfil (substitui os da nuvem)')){S=Object.assign(DEF(),r)}else S.ts=Date.now()}
-    else if(r)S=Object.assign(DEF(),r);
-    else S.ts=Date.now();
+    await refreshGroup();grpChecked=true;
+    const rem=await getRemote(),has=S.tx.length||S.bills.length||S.goals.length||(S.rec||[]).length;
+    if(rem&&Object.keys(rem.data).length&&has){
+      if(!confirm('Esta conta já tem dados na nuvem.\n\nOK = juntar os dados deste perfil com os da nuvem\nCancelar = usar só os da nuvem (os deste perfil serão substituídos)')){S=Object.assign(DEF(),rem.data);saveBase(baseOf(S))}
+    }
     persist();syncMsg='';await syncNow(true);
   }catch(e){syncMsg='Erro ao vincular a conta.'}
   render();
 }
 async function openAcctProfile(){
   let p=PR.find(x=>x.email===user.email);
-  if(!p){const r=await getRemote(),id='p'+uid();p={id,name:user.email.split('@')[0],key:'rcs-'+id,acct:true,email:user.email};PR.push(p);savePR();if(r)try{localStorage.setItem(p.key,JSON.stringify(r))}catch(e){}}
+  if(!p){
+    const id='p'+uid();p={id,name:user.email.split('@')[0],key:'rcs-'+id,acct:true,email:user.email};PR.push(p);savePR();
+    cur=p;await refreshGroup();
+    const r=await getRemote();if(r&&Object.keys(r.data).length)try{localStorage.setItem(p.key,JSON.stringify(r.data))}catch(e){}
+  }
   openProfile(p);
 }
 async function gateIn(kind){
@@ -163,7 +267,7 @@ async function resetPw(){
     await openAcctProfile();
   }catch(e){alert('Não foi possível salvar a nova senha. Tente de novo.')}
 }
-async function accOut(){try{await sb.auth.signOut()}catch(e){}user=null;cur.acct=false;cur.email=null;savePR();syncMsg='';render()}
+async function accOut(){try{await sb.auth.signOut()}catch(e){}user=null;cur.acct=false;cur.email=null;delete cur.grp;delete cur.grpName;delete cur.code;grpMembers=null;savePR();syncMsg='';render()}
 let pushSt='?';
 const b64u=x=>{const p='='.repeat((4-x.length%4)%4),r=atob((x+p).replace(/-/g,'+').replace(/_/g,'/'));return Uint8Array.from(r,c=>c.charCodeAt(0))};
 const pushOK=()=>'serviceWorker' in navigator&&'PushManager' in window&&'Notification' in window;
@@ -258,7 +362,63 @@ function showWelcome(){
 }
 function configTab(){
   const perfil=`<div class="sec"><h2>Perfil: ${E(cur?cur.name:'')}</h2><div class="f"><button class="s" style="width:100%" onclick="showWelcome()">Como usar o app</button><button class="s" style="width:100%" onclick="lock()">Trocar de perfil</button><button class="s" style="width:100%" onclick="delProfile()">Apagar este perfil</button></div></div>`;
-  return `<h1>Configurações</h1>${catCard()}<div class="card">${pushCard()}</div><div class="card">${syncCard()}</div><div class="card">${perfil}</div>`;
+  return `<h1>Configurações</h1>${catCard()}<div class="card">${pushCard()}</div><div class="card">${syncCard()}</div><div class="card">${groupCard()}</div><div class="card">${perfil}</div>`;
+}
+async function loadMembers(){
+  if(!cur||!cur.grp||!sb)return;
+  try{const {data}=await sb.from('group_members').select('name').eq('group_id',cur.grp);grpMembers=(data||[]).map(x=>x.name||'Membro')}catch(e){}
+  if(tab==='config')softRender();
+}
+const gv=k=>(document.getElementById(k).value||'').trim();
+async function grpCreate(){
+  const nm=gv('gp_name')||'Família',me=gv('gp_me');
+  if(!me){alert('Digite o seu nome (como os outros vão te ver).');return}
+  if(!(cur&&cur.acct&&syncOk())){alert('Entre na conta em "Sincronização" primeiro.');return}
+  try{
+    const {data,error}=await sb.rpc('create_group',{gname:nm,myname:me});
+    if(error)throw error;
+    cur.grp=data.id;cur.grpName=data.name;cur.code=data.code;cur.gname=me;savePR();grpMembers=null;
+    await syncNow(true);toast('Grupo criado. Passe o código para quem vai entrar.');
+  }catch(e){alert('Não foi possível criar o grupo: '+((e&&e.message)||e))}
+  render();
+}
+async function grpJoin(){
+  const code=gv('gp_code'),me=gv('gp_me');
+  if(!me){alert('Digite o seu nome (como os outros vão te ver).');return}
+  if(!code){alert('Digite o código que você recebeu.');return}
+  if(!(cur&&cur.acct&&syncOk())){alert('Entre na conta em "Sincronização" primeiro.');return}
+  try{
+    const {data,error}=await sb.rpc('join_group',{gcode:code,myname:me});
+    if(error)throw error;
+    cur.grp=data.id;cur.grpName=data.name;cur.code=data.code;cur.gname=me;savePR();grpMembers=null;
+    const rem=await getRemote(),has=S.tx.length||S.bills.length||S.goals.length;
+    if(has&&rem&&Object.keys(rem.data).length){
+      if(!confirm('Juntar os dados que você já tem aqui com os da família?\n\nOK = juntar tudo\nCancelar = usar só os da família (os seus atuais ficam de fora)')){S=Object.assign(DEF(),rem.data);saveBase(baseOf(S));persist()}
+    }
+    await syncNow(true);toast('Você entrou no grupo.');
+  }catch(e){alert('Não foi possível entrar no grupo: '+((e&&e.message)||e))}
+  render();
+}
+async function grpLeave(){
+  if(!confirm('Sair do grupo? Você continua com uma cópia dos dados neste aparelho, mas deixa de ver o que os outros lançarem.'))return;
+  try{
+    await syncNow(true);
+    const {error}=await sb.rpc('leave_group');if(error)throw error;
+    delete cur.grp;delete cur.grpName;delete cur.code;savePR();grpMembers=null;
+    await syncNow(true);
+  }catch(e){alert('Não foi possível sair do grupo: '+((e&&e.message)||e))}
+  render();
+}
+function grpCopy(){try{navigator.clipboard.writeText(cur.code||'');toast('Código copiado.')}catch(e){alert('Copie manualmente o código mostrado na tela.')}}
+function groupCard(){
+  if(!sb)return '';
+  if(!(cur&&cur.acct))return `<div class="sec"><h2>👨‍👩‍👧 Família</h2><div class="mut">Entre na conta em Sincronização para compartilhar os dados com a família.</div></div>`;
+  if(cur.grp){
+    if(grpMembers===null){grpMembers=[];loadMembers()}
+    const code=(cur.code||'').replace(/(.{4})(.{4})/,'$1-$2');
+    return `<div class="sec"><h2>👨‍👩‍👧 ${E(cur.grpName||'Família')}</h2><div class="mut">Todos do grupo veem e editam os mesmos dados. Cada um entra com a própria conta.</div><div class="mut" style="margin-top:6px">Membros: ${E(grpMembers.join(', ')||'…')}</div><div style="margin:8px 0">Código para convidar: <b style="letter-spacing:1px">${E(code)}</b></div><div class="f2"><button onclick="grpCopy()">Copiar código</button><button class="s" style="width:100%" onclick="grpLeave()">Sair do grupo</button></div></div>`;
+  }
+  return `<div class="sec"><h2>👨‍👩‍👧 Família</h2><div class="mut" style="margin-bottom:8px">Compartilhe os mesmos dados com quem você quiser. Cada pessoa entra com a própria conta.</div><div class="f"><input id="gp_me" placeholder="Seu nome (como os outros vão te ver)" value="${E(cur.gname||cur.name||'')}"><input id="gp_name" placeholder="Nome do grupo (ex.: Família)"><button onclick="grpCreate()">Criar grupo</button><div class="k">Já recebeu um código?</div><div class="f2"><input id="gp_code" placeholder="Código (ex.: A1B2-C3D4)"><button onclick="grpJoin()">Entrar</button></div></div></div>`;
 }
 function syncCard(){
   if(!sb)return `<div class="sec"><h2>Sincronização</h2><div class="mut">Ainda não configurada neste site.</div></div>`;
@@ -277,13 +437,13 @@ function boot(){
   if(!p){gate={m:'pick'};render();return}
   openProfile(p);
 }
-function openProfile(p){sessChk=false;cur=p;KEY=p.key;gate=null;try{localStorage.setItem('rcs-last',p.id)}catch(e){}S=DEF();vm=iso(today()).slice(0,7);tab='resumo';ed=null;loadLocal();syncNow();if(needWelcome())showWelcome()}
+function openProfile(p){sessChk=false;grpChecked=false;grpMembers=null;cur=p;KEY=p.key;gate=null;try{localStorage.setItem('rcs-last',p.id)}catch(e){}S=DEF();vm=iso(today()).slice(0,7);tab='resumo';ed=null;loadLocal();syncNow();if(needWelcome())showWelcome()}
 const go=m=>{gate={m};render()};
 function pickP(id){openProfile(PR.find(x=>x.id===id))}
 async function newP(){const n=pn.value.trim();if(!n)return;const id='p'+uid(),p={id,name:n,key:'rcs-'+id};PR.push(p);savePR();openProfile(p)}
 function lock(){gate={m:'pick'};render()}
 function delProfile(p,ask){p=p||cur;if(!confirm(ask||'Apagar este perfil e todos os dados dele neste aparelho?'))return;
-  try{localStorage.removeItem(p.key);localStorage.removeItem('rcs-last')}catch(e){}
+  try{localStorage.removeItem(p.key);localStorage.removeItem(p.key+':base');localStorage.removeItem('rcs-last')}catch(e){}
   PR=PR.filter(x=>x.id!==p.id);savePR();cur=null;S=DEF();gate=PR.length?{m:'pick'}:{m:'new'};render()}
 function gateHtml(){
   const g=gate;
@@ -294,6 +454,7 @@ function gateHtml(){
 }
 document.addEventListener('visibilitychange',()=>{if(document.hidden){hiddenAt=Date.now();if(pt){clearTimeout(pt);pt=null;syncNow()}}else{syncNow()}});
 window.addEventListener('online',()=>syncNow());
+setInterval(()=>{if(!document.hidden&&cur&&cur.grp&&!gate)syncNow()},45000);
 const tot=mk=>{const o={r:0,g:0,i:0};S.tx.forEach(t=>{if(monthKey(t.date)===mk)o[t.type==='receita'?'r':t.type==='gasto'?'g':'i']+=t.value});return o};
 const addM=(mk,n)=>{const [y,m]=mk.split('-').map(Number);return iso(new Date(y,m-1+n,1)).slice(0,7)};
 const mname=mk=>{const [y,m]=mk.split('-').map(Number);return new Date(y,m-1,1).toLocaleDateString('pt-BR',{month:'short'}).replace('.','')};
@@ -317,7 +478,7 @@ function genRec(){
     (S.rec||[]).forEach(r=>{const key=r.id+':'+mk;if(S.recGen[key])return;S.recGen[key]=1;ch=true;
       const due=mk+'-'+String(r.day).padStart(2,'0');
       if(due<(r.created||'0000'))return;
-      S.bills.push({id:uid(),name:r.name,value:r.value,due,paid:false,rec:r.id})})});
+      S.bills.push({id:'g'+r.id+'-'+mk,name:r.name,value:r.value,due,paid:false,rec:r.id})})});
   if(genInc())ch=true;
   if(genParc())ch=true;
   return ch;
@@ -330,7 +491,7 @@ function genInc(){
       if(date>td)return;
       S.recIncGen[key]=1;ch=true;
       if(date<(r.created||'0000'))return;
-      S.tx.push({id:uid(),type:'receita',value:r.value,date,cat:'Receitas',desc:r.name,fixed:r.id})})});
+      S.tx.push({id:'i'+r.id+'-'+mk,type:'receita',value:r.value,date,cat:'Receitas',desc:r.name,fixed:r.id})})});
   return ch;
 }
 const catSpend=v=>{const by={};v.m.filter(t=>t.type==='gasto').forEach(t=>by[t.cat]=(by[t.cat]||0)+t.value);return by};
@@ -339,11 +500,12 @@ function init(){boot()}
 function loadLocal(){
   loaded=true;note=(cur&&cur.acct)?'':'Salvando só neste aparelho (sem sincronização).';
   try{const r=localStorage.getItem(KEY);if(r)S=Object.assign(DEF(),JSON.parse(r))}catch(e){}
+  if(!loadBase())saveBase(baseOf(S));
   if(genRec()){try{localStorage.setItem(KEY,JSON.stringify(S))}catch(e){}}
   render();
 }
 function save(){
-  undoSnap=null;S.ts=Date.now();render();persist();schedPush();
+  undoSnap=null;edits++;S.ts=Date.now();stampLocal();render();persist();schedPush();
 }
 const monthKey=s=>s.slice(0,7);
 const readDays=(a,b)=>[...new Set([a,b].map(x=>parseInt(x)).filter(n=>n>=1&&n<=28))].sort((x,y)=>x-y);
@@ -414,7 +576,7 @@ function genParc(){
   let ch=false;const td=iso(today());S.parcGen=S.parcGen||{};
   (S.parc||[]).forEach(p=>{for(let k=0;k<p.n;k++){const date=parcDate(p,k);if(date>td)break;const key=p.id+':'+k;if(S.parcGen[key])continue;S.parcGen[key]=1;ch=true;
     if(date<(p.created||'0000'))continue;
-    S.tx.push({id:uid(),type:'gasto',value:p.value,date,cat:p.cat||'Outros',desc:`${p.name} (${k+1}/${p.n})`,parc:p.id})}});
+    S.tx.push({id:'p'+p.id+'-'+k,type:'gasto',value:p.value,date,cat:p.cat||'Outros',desc:`${p.name} (${k+1}/${p.n})`,parc:p.id})}});
   return ch;
 }
 function parcCard(){
@@ -441,7 +603,7 @@ function forecast(v){
 }
 let fx={q:'',cat:'',type:'',mon:''},rifOpen=false;
 const norm=x=>String(x||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'');
-const txRow=t=>`<div class="row"><div><div>${E(t.desc||t.cat)}</div><div class="mut">${parse(t.date).toLocaleDateString('pt-BR')} · ${t.type==='gasto'?E(t.cat):t.type}</div></div><div style="text-align:right"><b class="${t.type==='gasto'?'red':'grn'}">${t.type==='gasto'?'−':'+'}${brl(t.value)}</b><br><button class="s" onclick="editTx('${t.id}')">✎</button> <button class="s" onclick="delTx('${t.id}')">✕</button></div></div>`;
+const txRow=t=>`<div class="row"><div><div>${E(t.desc||t.cat)}</div><div class="mut">${parse(t.date).toLocaleDateString('pt-BR')} · ${t.type==='gasto'?E(t.cat):t.type}${t.by&&cur&&cur.grp?' · '+E(t.by):''}</div></div><div style="text-align:right"><b class="${t.type==='gasto'?'red':'grn'}">${t.type==='gasto'?'−':'+'}${brl(t.value)}</b><br><button class="s" onclick="editTx('${t.id}')">✎</button> <button class="s" onclick="delTx('${t.id}')">✕</button></div></div>`;
 function fxList(){
   const q=norm(fx.q);
   const all=S.tx.filter(t=>(!fx.type||t.type===fx.type)&&(!fx.cat||t.cat===fx.cat)&&(!fx.mon||monthKey(t.date)===fx.mon)&&(!q||norm(t.desc).includes(q)||norm(t.cat).includes(q))).sort((a,b)=>b.date.localeCompare(a.date));
@@ -478,7 +640,7 @@ function openSheet(id){
 }
 function closeSheet(){ed=null;document.getElementById('sheet').hidden=true}
 function addTx(){const v=parseFloat(vl.value);if(!(v>0))return;const o={type:ty.value,value:v,date:dt.value||iso(today()),cat:ct.value,desc:ds.value.trim()};
-  if(ed){const t=S.tx.find(x=>x.id===ed);if(t)Object.assign(t,o)}else S.tx.push(Object.assign({id:uid()},o));
+  if(ed){const t=S.tx.find(x=>x.id===ed);if(t)Object.assign(t,o)}else S.tx.push(Object.assign({id:uid(),by:who()},o));
   limitCheck(o);closeSheet();save()}
 const editTx=i=>openSheet(i),cancelEd=closeSheet;
 function delTx(i){withUndo('Lançamento apagado',()=>{S.tx=S.tx.filter(t=>t.id!==i);save()})}
@@ -523,7 +685,7 @@ function addGoal(){const t=parseFloat(gt.value);if(!gn.value.trim()||!(t>0))retu
 function addDep(id){const g=S.goals.find(x=>x.id===id),v=parseFloat(document.getElementById('dv_'+id).value),d=document.getElementById('dd_'+id).value||iso(today());
   if(!g||!(v>0))return;const did=uid(),tid=uid();
   g.deps=g.deps||[];g.deps.push({id:did,date:d,value:v,tx:tid});
-  S.tx.push({id:tid,type:'investimento',value:v,date:d,cat:'Metas',desc:'Meta: '+g.name});
+  S.tx.push({id:tid,type:'investimento',value:v,date:d,cat:'Metas',desc:'Meta: '+g.name,by:who()});
   gOpen['d'+id]=false;save()}
 function delDep(gid,did){const g=S.goals.find(x=>x.id===gid);if(!g)return;const d=(g.deps||[]).find(x=>x.id===did);
   withUndo('Aporte apagado',()=>{g.deps=(g.deps||[]).filter(x=>x.id!==did);if(d&&d.tx)S.tx=S.tx.filter(t=>t.id!==d.tx);save()})}
@@ -545,7 +707,7 @@ function render(){
 function toggleBk(){const m=document.getElementById('bkmenu');m.hidden=!m.hidden}
 document.addEventListener('click',e=>{const m=document.getElementById('bkmenu');if(m&&!m.hidden&&e.target.closest&&!e.target.closest('#tools'))m.hidden=true});
 function exportar(){const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([JSON.stringify(S)],{type:'application/json'}));a.download='financas-'+iso(today())+'.json';a.click()}
-function importar(f){if(!f)return;const r=new FileReader();r.onload=()=>{try{const d=JSON.parse(r.result);if(!confirm('Isso substitui os dados deste aparelho. Continuar?'))return;S=Object.assign(DEF(),d);genRec();save()}catch(e){alert('Arquivo inválido.')}};r.readAsText(f)}
+function importar(f){if(!f)return;const r=new FileReader();r.onload=()=>{try{const d=JSON.parse(r.result);if(!confirm(cur&&cur.grp?'Isso substitui os dados da FAMÍLIA, para todos do grupo. Continuar?':'Isso substitui os dados deste aparelho. Continuar?'))return;S=Object.assign(DEF(),d);genRec();save()}catch(e){alert('Arquivo inválido.')}};r.readAsText(f)}
 function exportXlsx(){
   if(typeof XLSX==='undefined'){alert('A biblioteca da planilha não carregou. Abra o app com internet e tente de novo.');return}
   const v=views(),mk=vm,money='R$ #,##0.00';
